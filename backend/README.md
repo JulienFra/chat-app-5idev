@@ -1,3 +1,4 @@
+[![CI](https://github.com/JulienFra/chat-app-5idev/actions/workflows/ci.yml/badge.svg)](https://github.com/JulienFra/chat-app-5idev/actions/workflows/ci.yml)
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>
