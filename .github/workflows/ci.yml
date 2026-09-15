@@ -67,11 +67,13 @@ jobs:
       - name: Installer les dépendances backend
         run: npm --prefix backend ci
 
-      - name: Générer le client Prisma
-        run: npm --prefix backend exec prisma generate
+            - name: Générer le client Prisma
+        working-directory: backend
+        run: npx prisma generate
 
       - name: Appliquer les migrations sur la base de test
-        run: npm --prefix backend exec prisma migrate deploy
+        working-directory: backend
+        run: npx prisma migrate deploy
 
       - name: Compiler le backend
         run: npm --prefix backend run build
