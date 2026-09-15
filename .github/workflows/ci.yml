@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint & Style
@@ -46,6 +50,9 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+    env:
+      DATABASE_URL: "postgresql://test_user:test_password@localhost:5432/chatapp_test?schema=public"
+
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4
@@ -60,7 +67,62 @@ jobs:
       - name: Installer les dépendances backend
         run: npm --prefix backend ci
 
+      - name: Générer le client Prisma
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Appliquer les migrations sur la base de test
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+      - name: Compiler le backend
+        run: npm --prefix backend run build
+
       - name: Lancer la suite de tests (jest)
-        env:
-          DATABASE_URL: "postgresql://test_user:test_password@localhost:5432/chatapp_test?schema=public"
         run: npm --prefix backend test
+
+  frontend:
+    name: Frontend (lint, build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Installer les dépendances frontend
+        run: npm --prefix frontend ci
+
+      - name: Vérifier le style du code (oxlint)
+        run: npm --prefix frontend run lint
+
+      - name: Compiler le frontend
+        run: npm --prefix frontend run build
+
+  deploy:
+    name: Deploy to VPS
+    needs: [ lint, test, frontend ]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déployer via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/chat-app-5idev
+            git pull origin main
+            cd backend
+            npm ci
+            npx prisma generate
+            npx prisma migrate deploy
+            npm run build
+            pm2 restart chatapp-backend
