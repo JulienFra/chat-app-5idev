@@ -67,7 +67,7 @@ jobs:
       - name: Installer les dépendances backend
         run: npm --prefix backend ci
 
-            - name: Générer le client Prisma
+      - name: Générer le client Prisma
         working-directory: backend
         run: npx prisma generate
 
