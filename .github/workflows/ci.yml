@@ -120,9 +120,18 @@ jobs:
             set -e
             cd ~/chat-app-5idev
             git pull origin main
+
+            # Backend
             cd backend
             npm ci
             npx prisma generate
             npx prisma migrate deploy
             npm run build
             pm2 restart chatapp-backend
+
+            # Frontend
+            cd ../frontend
+            npm ci
+            npm run build
+            rm -rf /var/www/chatapp/*
+            cp -r dist/* /var/www/chatapp/
