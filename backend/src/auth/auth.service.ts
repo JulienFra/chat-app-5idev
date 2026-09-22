@@ -1,11 +1,15 @@
-import { Injectable, ConflictException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import * as bcrypt from 'bcrypt';
+import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
-  constructor(private usersService: UsersService) {}
+  constructor(private usersService: UsersService,
+    private jwtService: JwtService // On injecte le service JWT
+  ) {}
 
   async register(registerDto: RegisterDto) {
     const { email, password, displayName } = registerDto;
@@ -26,4 +30,25 @@ export class AuthService {
     const { passwordHash: _, ...result } = newUser;
     return result;
   }
+  async login(loginDto: LoginDto) {
+    const { email, password } = loginDto;
+
+    // 1. Chercher l'utilisateur par son email
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      throw new UnauthorizedException('Identifiants invalides');
+    }
+
+    // 2. Comparer le mot de passe fourni avec le hash stocké en base
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Identifiants invalides');
+    }
+
+    // 3. Générer et renvoyer le jeton JWT
+    const payload = { sub: user.id, email: user.email };
+    return {
+      access_token: await this.jwtService.signAsync(payload),
+    };
+    }
 }
