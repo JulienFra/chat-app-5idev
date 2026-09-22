@@ -1,24 +1,17 @@
-import 'dotenv/config'; // Force Node à lire le .env immédiatement
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import { PrismaPg } from '@prisma/adapter-pg';
-
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
   async findByEmail(email: string) {
-    return prisma.user.findUnique({ where: { email } });
+    return this.prisma.user.findUnique({ where: { email } });
   }
 
   async create(email: string, passwordHash: string, displayName: string) {
-    return prisma.user.create({
-      data: { 
-        email, 
-        passwordHash,
-        displayName 
-      },
+    return this.prisma.user.create({
+      data: { email, passwordHash, displayName },
     });
   }
 }
