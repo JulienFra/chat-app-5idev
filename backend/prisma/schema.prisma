@@ -7,21 +7,21 @@ datasource db {
 }
 
 model User {
-  id           String         @id @default(uuid())
-  email        String         @unique
+  id           String       @id @default(uuid())
+  email        String       @unique
   passwordHash String
   displayName  String
-  createdAt    DateTime       @default(now())
+  createdAt    DateTime     @default(now())
 
   memberships  Membership[]
   messages     Message[]
 }
 
 model Conversation {
-  id          String         @id @default(uuid())
-  isGroup     Boolean        @default(false)
-  name        String?        // utile uniquement si isGroup = true
-  createdAt   DateTime       @default(now())
+  id          String       @id @default(uuid())
+  isGroup     Boolean      @default(false)
+  name        String?      // utile uniquement si isGroup = true
+  createdAt   DateTime     @default(now())
 
   memberships Membership[]
   messages    Message[]
@@ -57,4 +57,3 @@ enum Role {
   MEMBER
   ADMIN
 }
-
