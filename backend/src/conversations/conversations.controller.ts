@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { ConversationsService } from './conversations.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
+import { CreateDirectDto } from './dto/create-direct.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('conversations')
@@ -10,13 +11,19 @@ export class ConversationsController {
 
   @Post()
   createGroup(@Req() req: any, @Body() dto: CreateConversationDto) {
-    const userId = req.user.sub || req.user.id;
-    return this.conversationsService.createGroup(userId, dto);
+    return this.conversationsService.createGroup(req.user.sub, dto);
+  }
+
+  @Post('direct')
+  createDirect(@Req() req: any, @Body() dto: CreateDirectDto) {
+    return this.conversationsService.findOrCreateDirect(
+      req.user.sub,
+      dto.otherUserId,
+    );
   }
 
   @Get()
   getUserConversations(@Req() req: any) {
-    const userId = req.user.sub || req.user.id;
-    return this.conversationsService.getUserConversations(userId);
+    return this.conversationsService.getUserConversations(req.user.sub);
   }
 }
