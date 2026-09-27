@@ -18,6 +18,7 @@ export interface Message {
   createdAt: string;
   authorId: string;
   conversationId: string;
+  author?: { id: string; displayName: string };
 }
 
 export interface Conversation {
