@@ -3,9 +3,10 @@ import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { AuthModule } from '../auth/auth.module';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
-  imports: [AuthModule, ConversationsModule],
+  imports: [AuthModule, ConversationsModule, RealtimeModule],
   controllers: [MessagesController],
   providers: [MessagesService],
   exports: [MessagesService],

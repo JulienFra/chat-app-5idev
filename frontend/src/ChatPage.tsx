@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, conversationTitle, errorMessage, getCurrentUserId } from './api';
+import { connectSocket, disconnectSocket } from './socket';
 import type { Conversation, Message } from './types';
 import ConversationView from './components/ConversationView';
 
@@ -14,6 +15,13 @@ export default function ChatPage({ onLogout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Garde la liste à jour dans une référence, lisible depuis les callbacks
+  const conversationsRef = useRef<Conversation[]>([]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  // Rechargement à la demande (bouton « Réessayer », nouvelle conversation)
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -26,19 +34,57 @@ export default function ChatPage({ onLogout }: Props) {
     }
   }, []);
 
+  // Premier chargement : les setState arrivent dans le .then, pas pendant l'effet
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    api<Conversation[]>('/conversations')
+      .then((data) => {
+        if (!cancelled) setConversations(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // Après un envoi : l'aperçu se met à jour et la conversation remonte en tête
-  const handleMessageSent = (message: Message) => {
-    setConversations((prev) => {
-      const conv = prev.find((c) => c.id === message.conversationId);
-      if (!conv) return prev;
-      const updated = { ...conv, messages: [message] };
-      return [updated, ...prev.filter((c) => c.id !== conv.id)];
-    });
-  };
+  // Met à jour l'aperçu et remonte la conversation en tête de liste.
+  // Appelée après un envoi ET à chaque message reçu en direct.
+  const handleNewMessage = useCallback(
+    (message: Message) => {
+      const known = conversationsRef.current.some((c) => c.id === message.conversationId);
+      if (!known) {
+        // Conversation inconnue (quelqu'un vient de nous écrire) : on recharge la liste
+        void load();
+        return;
+      }
+      setConversations((prev) => {
+        const conv = prev.find((c) => c.id === message.conversationId);
+        if (!conv) return prev;
+        const updated = { ...conv, messages: [message] };
+        return [updated, ...prev.filter((c) => c.id !== conv.id)];
+      });
+    },
+    [load],
+  );
+
+  // Écouter les messages en direct, pour TOUTES les conversations
+  useEffect(() => {
+    const socket = connectSocket();
+    socket.on('message:new', handleNewMessage);
+    return () => {
+      socket.off('message:new', handleNewMessage);
+    };
+  }, [handleNewMessage]);
+
+  // Fermer la connexion WebSocket en quittant la messagerie (déconnexion)
+  useEffect(() => {
+    return () => disconnectSocket();
+  }, []);
 
   const teams = conversations.filter((c) => c.isGroup);
   const directs = conversations.filter((c) => !c.isGroup);
@@ -136,7 +182,7 @@ export default function ChatPage({ onLogout }: Props) {
             conversation={selected}
             meId={meId}
             onBack={() => setSelectedId(null)}
-            onMessageSent={handleMessageSent}
+            onMessageSent={handleNewMessage}
           />
         ) : (
           <div className="grid flex-1 place-items-center text-zinc-500">

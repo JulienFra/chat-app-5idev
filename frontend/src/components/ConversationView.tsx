@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, conversationTitle, errorMessage } from '../api';
+import { connectSocket } from '../socket';
 import type { Conversation, Message } from '../types';
 
 interface Props {
@@ -13,6 +14,11 @@ interface Props {
 function formatTime(iso: string): string {
   // Le serveur stocke en UTC, le navigateur convertit en heure locale
   return new Date(iso).toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Ajoute un message sauf s'il est déjà affiché
+function addMessage(list: Message[], message: Message): Message[] {
+  return list.some((m) => m.id === message.id) ? list : [...list, message];
 }
 
 export default function ConversationView({ conversation, meId, onBack, onMessageSent }: Props) {
@@ -42,6 +48,19 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
     };
   }, [conversation.id]);
 
+  // Recevoir en direct les nouveaux messages de CETTE conversation
+  useEffect(() => {
+    const socket = connectSocket();
+    const onNewMessage = (message: Message) => {
+      if (message.conversationId !== conversation.id) return;
+      setMessages((prev) => addMessage(prev, message));
+    };
+    socket.on('message:new', onNewMessage);
+    return () => {
+      socket.off('message:new', onNewMessage);
+    };
+  }, [conversation.id]);
+
   // Toujours afficher le message le plus récent
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
@@ -59,7 +78,7 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
         method: 'POST',
         body: { content },
       });
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => addMessage(prev, message));
       setDraft('');
       onMessageSent(message);
     } catch (err) {
@@ -100,9 +119,7 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
         )}
 
         {!loading && !error && messages.length === 0 && (
-          <p className="text-center text-sm text-zinc-500">
-            Aucun message. Écris le premier !
-          </p>
+          <p className="text-center text-sm text-zinc-500">Aucun message. Écris le premier !</p>
         )}
 
         {messages.map((m, i) => {
