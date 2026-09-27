@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, conversationTitle, errorMessage, getCurrentUserId } from './api';
-import type { Conversation } from './types';
+import type { Conversation, Message } from './types';
+import ConversationView from './components/ConversationView';
 
 interface Props {
   onLogout: () => void;
@@ -28,6 +29,16 @@ export default function ChatPage({ onLogout }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Après un envoi : l'aperçu se met à jour et la conversation remonte en tête
+  const handleMessageSent = (message: Message) => {
+    setConversations((prev) => {
+      const conv = prev.find((c) => c.id === message.conversationId);
+      if (!conv) return prev;
+      const updated = { ...conv, messages: [message] };
+      return [updated, ...prev.filter((c) => c.id !== conv.id)];
+    });
+  };
 
   const teams = conversations.filter((c) => c.isGroup);
   const directs = conversations.filter((c) => !c.isGroup);
@@ -66,7 +77,6 @@ export default function ChatPage({ onLogout }: Props) {
 
   return (
     <div className="fixed inset-0 grid grid-cols-1 bg-zinc-950 text-zinc-100 md:grid-cols-[300px_1fr]">
-      {/* Barre latérale : cachée sur mobile quand une conversation est ouverte */}
       <aside
         className={`min-h-0 flex-col border-r border-zinc-800 bg-zinc-900 ${
           selected ? 'hidden md:flex' : 'flex'
@@ -119,25 +129,15 @@ export default function ChatPage({ onLogout }: Props) {
         </div>
       </aside>
 
-      {/* Conversation : cachée sur mobile tant qu'aucune n'est ouverte */}
       <main className={`min-h-0 min-w-0 flex-col ${selected ? 'flex' : 'hidden md:flex'}`}>
         {selected ? (
-          <>
-            <header className="flex items-center gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-3">
-              <button
-                type="button"
-                onClick={() => setSelectedId(null)}
-                className="text-xl text-zinc-400 hover:text-white md:hidden"
-                aria-label="Retour"
-              >
-                ←
-              </button>
-              <h2 className="font-semibold">{conversationTitle(selected, meId)}</h2>
-            </header>
-            <div className="grid flex-1 place-items-center text-zinc-500">
-              Les messages arrivent à l'étape 4.
-            </div>
-          </>
+          <ConversationView
+            key={selected.id}
+            conversation={selected}
+            meId={meId}
+            onBack={() => setSelectedId(null)}
+            onMessageSent={handleMessageSent}
+          />
         ) : (
           <div className="grid flex-1 place-items-center text-zinc-500">
             Sélectionne une conversation
