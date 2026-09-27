@@ -6,6 +6,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { MessagesModule } from './messages/messages.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { ConversationsModule } from './conversations/conversations.module';
     UsersModule,
     AuthModule,
     ConversationsModule,
+    MessagesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
