@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, conversationTitle, errorMessage, getCurrentUserId } from './api';
 import { connectSocket, disconnectSocket } from './socket';
 import type { Conversation, Message } from './types';
@@ -14,6 +14,12 @@ export default function ChatPage({ onLogout }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // État du modal de création de groupe
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Garde la liste à jour dans une référence, lisible depuis les callbacks
   const conversationsRef = useRef<Conversation[]>([]);
@@ -34,7 +40,7 @@ export default function ChatPage({ onLogout }: Props) {
     }
   }, []);
 
-  // Premier chargement : les setState arrivent dans le .then, pas pendant l'effet
+  // Premier chargement
   useEffect(() => {
     let cancelled = false;
     api<Conversation[]>('/conversations')
@@ -52,13 +58,11 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, []);
 
-  // Met à jour l'aperçu et remonte la conversation en tête de liste.
-  // Appelée après un envoi ET à chaque message reçu en direct.
+  // Met à jour l'aperçu et remonte la conversation en tête de liste
   const handleNewMessage = useCallback(
     (message: Message) => {
       const known = conversationsRef.current.some((c) => c.id === message.conversationId);
       if (!known) {
-        // Conversation inconnue (quelqu'un vient de nous écrire) : on recharge la liste
         void load();
         return;
       }
@@ -72,7 +76,7 @@ export default function ChatPage({ onLogout }: Props) {
     [load],
   );
 
-  // Écouter les messages en direct, pour TOUTES les conversations
+  // Écouter les messages en direct
   useEffect(() => {
     const socket = connectSocket();
     socket.on('message:new', handleNewMessage);
@@ -81,10 +85,33 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, [handleNewMessage]);
 
-  // Fermer la connexion WebSocket en quittant la messagerie (déconnexion)
+  // Fermer la connexion WebSocket en quittant la messagerie
   useEffect(() => {
     return () => disconnectSocket();
   }, []);
+
+  // Création du groupe via l'API (objet direct sans JSON.stringify)
+  const handleCreateGroup = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newGroupName.trim()) return;
+
+    setCreatingGroup(true);
+    setCreateError(null);
+    try {
+      const created = await api<Conversation>('/conversations', {
+        method: 'POST',
+        body: { name: newGroupName.trim() },
+      });
+      setConversations((prev) => [created, ...prev]);
+      setSelectedId(created.id);
+      setIsModalOpen(false);
+      setNewGroupName('');
+    } catch (err) {
+      setCreateError(errorMessage(err));
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
 
   const teams = conversations.filter((c) => c.isGroup);
   const directs = conversations.filter((c) => !c.isGroup);
@@ -153,9 +180,20 @@ export default function ChatPage({ onLogout }: Props) {
 
           {!loading && !error && (
             <>
-              <h2 className="px-2 pt-4 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase">
-                Équipes
-              </h2>
+              <div className="flex items-center justify-between px-2 pt-4 pb-1">
+                <h2 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">
+                  Équipes
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(true)}
+                  className="rounded px-1.5 py-0.5 text-xs font-bold text-violet-400 hover:bg-zinc-800 hover:text-violet-300"
+                  title="Créer une nouvelle équipe"
+                >
+                  + Nouveau
+                </button>
+              </div>
+
               {teams.length === 0 ? (
                 <p className="px-2 text-sm text-zinc-500">Aucune équipe</p>
               ) : (
@@ -190,6 +228,55 @@ export default function ChatPage({ onLogout }: Props) {
           </div>
         )}
       </main>
+
+      {/* Modal de création d'équipe */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-white">Créer une équipe</h3>
+            <form onSubmit={handleCreateGroup} className="mt-4 space-y-4">
+              <div>
+                <label htmlFor="groupName" className="block text-xs font-medium text-zinc-400">
+                  Nom du salon
+                </label>
+                <input
+                  id="groupName"
+                  type="text"
+                  required
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="Ex: Projet S4, Général..."
+                  className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
+                />
+              </div>
+
+              {createError && (
+                <p className="text-xs text-red-400">{createError}</p>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    setCreateError(null);
+                  }}
+                  className="rounded-lg px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingGroup || !newGroupName.trim()}
+                  className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
+                >
+                  {creatingGroup ? 'Création…' : 'Créer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
