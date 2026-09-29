@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, conversationTitle, errorMessage } from '../api';
 import { connectSocket } from '../socket';
-import type { Conversation, Message } from '../types';
+import type { Conversation, Message, Membership } from '../types';
 
 interface Props {
   conversation: Conversation;
@@ -12,17 +12,16 @@ interface Props {
 }
 
 function formatTime(iso: string): string {
-  // Le serveur stocke en UTC, le navigateur convertit en heure locale
   return new Date(iso).toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
 }
 
-// Ajoute un message sauf s'il est déjà affiché
 function addMessage(list: Message[], message: Message): Message[] {
   return list.some((m) => m.id === message.id) ? list : [...list, message];
 }
 
 export default function ConversationView({ conversation, meId, onBack, onMessageSent }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [memberships, setMemberships] = useState<Membership[]>(conversation.memberships ?? []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -30,7 +29,22 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
   const [sendError, setSendError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Charger l'historique à l'ouverture de la conversation
+  // Gestion du modal d'ajout de membre (S4)
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [identifier, setIdentifier] = useState('');
+  const [addingMember, setAddingMember] = useState(false);
+  const [addMemberError, setAddMemberError] = useState<string | null>(null);
+
+  // Vérifier si l'utilisateur connecté est ADMIN de ce salon
+  const myMembership = memberships.find((m) => m.userId === meId);
+  const isAdmin = conversation.isGroup && myMembership?.role === 'ADMIN';
+
+  // Synchroniser les membres si la conversation change
+  useEffect(() => {
+    setMemberships(conversation.memberships ?? []);
+  }, [conversation]);
+
+  // Charger l'historique
   useEffect(() => {
     let cancelled = false;
     api<Message[]>(`/conversations/${conversation.id}/messages`)
@@ -48,7 +62,7 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
     };
   }, [conversation.id]);
 
-  // Recevoir en direct les nouveaux messages de CETTE conversation
+  // Messages Socket.io en direct
   useEffect(() => {
     const socket = connectSocket();
     const onNewMessage = (message: Message) => {
@@ -61,7 +75,6 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
     };
   }, [conversation.id]);
 
-  // Toujours afficher le message le plus récent
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
@@ -88,25 +101,59 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
     }
   };
 
+  const handleAddMember = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!identifier.trim()) return;
+
+    setAddingMember(true);
+    setAddMemberError(null);
+    try {
+      const newMembership = await api<Membership>(`/conversations/${conversation.id}/members`, {
+        method: 'POST',
+        body: { identifier: identifier.trim() },
+      });
+      setMemberships((prev) => [...prev.filter((m) => m.userId !== newMembership.userId), newMembership]);
+      setIsAddModalOpen(false);
+      setIdentifier('');
+    } catch (err) {
+      setAddMemberError(errorMessage(err));
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
   return (
     <>
-      <header className="flex items-center gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-xl text-zinc-400 hover:text-white md:hidden"
-          aria-label="Retour"
-        >
-          ←
-        </button>
-        <div className="min-w-0">
-          <h2 className="truncate font-semibold">{conversationTitle(conversation, meId)}</h2>
-          {conversation.isGroup && (
-            <p className="truncate text-xs text-zinc-500">
-              {conversation.memberships.map((m) => m.user.displayName).join(', ')}
-            </p>
-          )}
+      <header className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-xl text-zinc-400 hover:text-white md:hidden"
+            aria-label="Retour"
+          >
+            ←
+          </button>
+          <div className="min-w-0">
+            <h2 className="truncate font-semibold">{conversationTitle(conversation, meId)}</h2>
+            {conversation.isGroup && (
+              <p className="truncate text-xs text-zinc-500">
+                {memberships.map((m) => m.user.displayName).join(', ')}
+              </p>
+            )}
+          </div>
         </div>
+
+        {/* Bouton visible uniquement pour l'ADMIN du salon */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setIsAddModalOpen(true)}
+            className="rounded-lg border border-violet-500/30 bg-violet-600/10 px-3 py-1.5 text-xs font-semibold text-violet-300 hover:bg-violet-600/20"
+          >
+            + Ajouter membre
+          </button>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -180,6 +227,58 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
           </button>
         </div>
       </form>
+
+      {/* Modal d'invitation de membre */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-white">Ajouter un membre</h3>
+            <p className="mt-1 text-xs text-zinc-400">
+              Entre l'adresse email de l'utilisateur à ajouter.
+            </p>
+            <form onSubmit={handleAddMember} className="mt-4 space-y-4">
+              <div>
+                <label htmlFor="userIdentifier" className="block text-xs font-medium text-zinc-400">
+                  Email du membre
+                </label>
+                <input
+                  id="userIdentifier"
+                  type="text"
+                  required
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="ex: alice@test.com"
+                  className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
+                />
+              </div>
+
+              {addMemberError && (
+                <p className="text-xs text-red-400">{addMemberError}</p>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setAddMemberError(null);
+                  }}
+                  className="rounded-lg px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingMember || !identifier.trim()}
+                  className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
+                >
+                  {addingMember ? 'Ajout…' : 'Ajouter'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

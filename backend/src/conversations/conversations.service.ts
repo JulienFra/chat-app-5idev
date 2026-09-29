@@ -21,7 +21,7 @@ export class ConversationsService {
     },
   };
 
-  // 1. Créer un groupe (Florentin)
+  // 1. Créer un groupe
   async createGroup(userId: string, dto: CreateConversationDto) {
     const memberIds = dto.memberIds
       ? Array.from(new Set(dto.memberIds.filter((id) => id !== userId)))
@@ -42,7 +42,7 @@ export class ConversationsService {
     });
   }
 
-  // 2. Lister les conversations de l'utilisateur (Florentin)
+  // 2. Lister les conversations de l'utilisateur
   async getUserConversations(userId: string) {
     return this.prisma.conversation.findMany({
       where: { memberships: { some: { userId } } },
@@ -69,7 +69,6 @@ export class ConversationsService {
       throw new NotFoundException('Utilisateur introuvable');
     }
 
-    // Une conversation 1:1 qui contient A ET B
     const existing = await this.prisma.conversation.findFirst({
       where: {
         isGroup: false,
@@ -110,5 +109,57 @@ export class ConversationsService {
     }
 
     return membership;
+  }
+
+  // 5. Vérifier que l'utilisateur est ADMIN du salon (Permissions S4)
+  async assertIsAdmin(userId: string, conversationId: string) {
+    const membership = await this.assertIsMember(userId, conversationId);
+
+    if (membership.role !== Role.ADMIN) {
+      throw new ForbiddenException('Action réservée aux administrateurs du salon');
+    }
+
+    return membership;
+  }
+
+  // 6. Ajouter un membre (par UUID ou par email) - réservé à l'ADMIN
+  async addMember(adminUserId: string, conversationId: string, identifier: string) {
+    await this.assertIsAdmin(adminUserId, conversationId);
+
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!conv) throw new NotFoundException('Salon introuvable');
+    if (!conv.isGroup) {
+      throw new BadRequestException('Impossible d’ajouter un membre à une discussion privée');
+    }
+
+    // Recherche par email ou par ID
+    const targetUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: identifier },
+          { id: identifier },
+        ],
+      },
+    });
+    if (!targetUser) {
+      throw new NotFoundException(`Aucun utilisateur trouvé pour "${identifier}"`);
+    }
+
+    return this.prisma.membership.upsert({
+      where: {
+        userId_conversationId: { userId: targetUser.id, conversationId },
+      },
+      update: {},
+      create: {
+        userId: targetUser.id,
+        conversationId,
+        role: Role.MEMBER,
+      },
+      include: {
+        user: { select: { id: true, displayName: true, email: true } },
+      },
+    });
   }
 }
