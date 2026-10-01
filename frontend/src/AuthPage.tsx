@@ -4,10 +4,11 @@ import { api, errorMessage } from './api';
 
 interface Props {
   onLoggedIn: (token: string) => void;
+  initialMode?: 'login' | 'register';
 }
 
-export default function AuthPage({ onLoggedIn }: Props) {
-  const [isLogin, setIsLogin] = useState(true);
+export default function AuthPage({ onLoggedIn, initialMode = 'login' }: Props) {
+  const [isLogin, setIsLogin] = useState(initialMode === 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
