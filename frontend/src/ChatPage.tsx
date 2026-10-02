@@ -8,6 +8,14 @@ interface Props {
   onLogout: () => void;
 }
 
+interface NotificationToast {
+  id: string;
+  conversationId: string;
+  senderName: string;
+  title: string;
+  content: string;
+}
+
 export default function ChatPage({ onLogout }: Props) {
   const meId = getCurrentUserId();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -15,19 +23,47 @@ export default function ChatPage({ onLogout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // État du modal de création de groupe
+  // État des messages non lus par conversation : { [convId]: number }
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+
+  // État du toast de notification en haut à droite
+  const [toast, setToast] = useState<NotificationToast | null>(null);
+
+  // Modal de création de groupe
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // Garde la liste à jour dans une référence, lisible depuis les callbacks
+  // Références stables pour les écouteurs Socket.io
   const conversationsRef = useRef<Conversation[]>([]);
+  const selectedIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
 
-  // Rechargement à la demande (bouton « Réessayer », nouvelle conversation)
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    // Quand on ouvre une conversation, on réinitialise son compteur de messages non lus
+    if (selectedId) {
+      setUnreadCounts((prev) => {
+        if (!prev[selectedId]) return prev;
+        const next = { ...prev };
+        delete next[selectedId];
+        return next;
+      });
+    }
+  }, [selectedId]);
+
+  // Demander la permission pour les notifications natives du navigateur
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  // Rechargement des conversations
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -58,25 +94,68 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, []);
 
-  // Met à jour l'aperçu et remonte la conversation en tête de liste
+  // Réception d'un nouveau message Socket.io
   const handleNewMessage = useCallback(
     (message: Message) => {
+      const isFromMe = message.authorId === meId;
+      const isCurrentConv = selectedIdRef.current === message.conversationId;
+
+      // 1. Mettre à jour l'aperçu et remonter la conversation
       const known = conversationsRef.current.some((c) => c.id === message.conversationId);
       if (!known) {
         void load();
-        return;
+      } else {
+        setConversations((prev) => {
+          const conv = prev.find((c) => c.id === message.conversationId);
+          if (!conv) return prev;
+          const updated = { ...conv, messages: [message] };
+          return [updated, ...prev.filter((c) => c.id !== conv.id)];
+        });
       }
-      setConversations((prev) => {
-        const conv = prev.find((c) => c.id === message.conversationId);
-        if (!conv) return prev;
-        const updated = { ...conv, messages: [message] };
-        return [updated, ...prev.filter((c) => c.id !== conv.id)];
-      });
+
+      // 2. Déclencher les notifications si ce n'est pas nous et que la conv n'est pas ouverte
+      if (!isFromMe && !isCurrentConv) {
+        // Incrémenter le badge non-lu
+        setUnreadCounts((prev) => ({
+          ...prev,
+          [message.conversationId]: (prev[message.conversationId] || 0) + 1,
+        }));
+
+        const targetConv = conversationsRef.current.find((c) => c.id === message.conversationId);
+        const title = targetConv ? conversationTitle(targetConv, meId) : 'Nouveau message';
+        const sender = message.author?.displayName ?? 'Un collègue';
+
+        // Notification Toast dans l'UI
+        setToast({
+          id: message.id,
+          conversationId: message.conversationId,
+          senderName: sender,
+          title,
+          content: message.content,
+        });
+
+        // Notification native du navigateur (si document caché ou minimisé)
+        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+          try {
+            new Notification(`${sender} (${title})`, {
+              body: message.content,
+              icon: '/favicon.ico',
+            });
+          } catch {}
+        }
+      }
     },
-    [load],
+    [load, meId],
   );
 
-  // Écouter les messages en direct
+  // Auto-effacement du toast au bout de 4 secondes
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // Écouter Socket.io
   useEffect(() => {
     const socket = connectSocket();
     socket.on('message:new', handleNewMessage);
@@ -85,12 +164,10 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, [handleNewMessage]);
 
-  // Fermer la connexion WebSocket en quittant la messagerie
   useEffect(() => {
     return () => disconnectSocket();
   }, []);
 
-  // Création du groupe via l'API (objet direct sans JSON.stringify)
   const handleCreateGroup = async (e: FormEvent) => {
     e.preventDefault();
     if (!newGroupName.trim()) return;
@@ -121,28 +198,41 @@ export default function ChatPage({ onLogout }: Props) {
     const title = conversationTitle(c, meId);
     const last = c.messages?.[0];
     const active = c.id === selectedId;
+    const unread = unreadCounts[c.id] || 0;
+
     return (
       <li key={c.id}>
         <button
           type="button"
           onClick={() => setSelectedId(c.id)}
-          className={`flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition ${
+          className={`relative flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left transition ${
             active ? 'bg-zinc-700/70 text-white' : 'text-zinc-300 hover:bg-zinc-800'
           }`}
         >
-          <span
-            className={`grid size-10 shrink-0 place-items-center font-semibold text-white ${
-              c.isGroup ? 'rounded-xl bg-violet-600' : 'rounded-full bg-indigo-500'
-            }`}
-          >
-            {title.charAt(0).toUpperCase()}
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate font-medium">{title}</span>
-            <span className="block truncate text-sm text-zinc-500">
-              {last ? last.content : 'Aucun message'}
+          <div className="flex min-w-0 items-center gap-3">
+            <span
+              className={`grid size-10 shrink-0 place-items-center font-semibold text-white ${
+                c.isGroup ? 'rounded-xl bg-violet-600' : 'rounded-full bg-indigo-500'
+              }`}
+            >
+              {title.charAt(0).toUpperCase()}
             </span>
-          </span>
+            <span className="min-w-0">
+              <span className={`block truncate ${unread > 0 ? 'font-bold text-white' : 'font-medium'}`}>
+                {title}
+              </span>
+              <span className={`block truncate text-sm ${unread > 0 ? 'font-medium text-zinc-300' : 'text-zinc-500'}`}>
+                {last ? last.content : 'Aucun message'}
+              </span>
+            </span>
+          </div>
+
+          {/* Badge de messages non lus */}
+          {unread > 0 && (
+            <span className="shrink-0 rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-sm shadow-violet-600/50">
+              {unread > 99 ? '99+' : unread}
+            </span>
+          )}
         </button>
       </li>
     );
@@ -150,6 +240,40 @@ export default function ChatPage({ onLogout }: Props) {
 
   return (
     <div className="fixed inset-0 grid grid-cols-1 bg-zinc-950 text-zinc-100 md:grid-cols-[300px_1fr]">
+      {/* Toast de Notification Flottant */}
+      {toast && (
+        <div
+          role="status"
+          onClick={() => {
+            setSelectedId(toast.conversationId);
+            setToast(null);
+          }}
+          className="fixed top-5 right-5 z-50 flex max-w-sm cursor-pointer items-start gap-3 rounded-xl border border-violet-500/40 bg-zinc-900/95 p-4 shadow-2xl backdrop-blur-md transition hover:border-violet-400 animate-in fade-in slide-in-from-top-3 duration-300"
+        >
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-violet-600 text-sm font-bold text-white">
+            💬
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-violet-300">{toast.title}</p>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setToast(null);
+                }}
+                className="text-xs text-zinc-500 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mt-0.5 text-xs font-bold text-white">{toast.senderName}</p>
+            <p className="mt-0.5 truncate text-xs text-zinc-400">{toast.content}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Barre latérale */}
       <aside
         className={`min-h-0 flex-col border-r border-zinc-800 bg-zinc-900 ${
           selected ? 'hidden md:flex' : 'flex'
@@ -213,6 +337,7 @@ export default function ChatPage({ onLogout }: Props) {
         </div>
       </aside>
 
+      {/* Vue de la discussion sélectionnée */}
       <main className={`min-h-0 min-w-0 flex-col ${selected ? 'flex' : 'hidden md:flex'}`}>
         {selected ? (
           <ConversationView
