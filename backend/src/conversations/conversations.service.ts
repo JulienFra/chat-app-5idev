@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 
 @Injectable()
 export class ConversationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeGateway, // NOUVEAU
+  ) {}
 
   // Ce qu'on renvoie avec chaque conversation : les membres, sans passwordHash
   private readonly conversationInclude = {
@@ -27,7 +31,7 @@ export class ConversationsService {
       ? Array.from(new Set(dto.memberIds.filter((id) => id !== userId)))
       : [];
 
-    return this.prisma.conversation.create({
+    const conversation = await this.prisma.conversation.create({
       data: {
         name: dto.name,
         isGroup: true,
@@ -40,6 +44,11 @@ export class ConversationsService {
       },
       include: this.conversationInclude,
     });
+
+    // NOUVEAU : le créateur ET les invités rejoignent la room tout de suite
+    this.realtime.addMembersToConversation([userId, ...memberIds], conversation.id);
+
+    return conversation;
   }
 
   // 2. Lister les conversations de l'utilisateur, avec leur nombre de non-lus
@@ -107,7 +116,7 @@ export class ConversationsService {
       return existing;
     }
 
-    return this.prisma.conversation.create({
+    const conversation = await this.prisma.conversation.create({
       data: {
         isGroup: false,
         memberships: {
@@ -119,6 +128,11 @@ export class ConversationsService {
       },
       include: this.conversationInclude,
     });
+
+    // NOUVEAU : seulement à la création (une conversation existante a déjà sa room)
+    this.realtime.addMembersToConversation([userId, otherUserId], conversation.id);
+
+    return conversation;
   }
 
   // 4. Vérifier qu'un utilisateur est membre d'une conversation
@@ -170,7 +184,7 @@ export class ConversationsService {
       throw new NotFoundException(`Aucun utilisateur trouvé pour "${identifier}"`);
     }
 
-    return this.prisma.membership.upsert({
+    const membership = await this.prisma.membership.upsert({
       where: {
         userId_conversationId: { userId: targetUser.id, conversationId },
       },
@@ -184,6 +198,11 @@ export class ConversationsService {
         user: { select: { id: true, displayName: true, email: true } },
       },
     });
+
+    // NOUVEAU : le nouveau membre rejoint la room et voit le groupe apparaître
+    this.realtime.addMembersToConversation([targetUser.id], conversationId);
+
+    return membership;
   }
 
   // 7. Marquer une conversation comme lue (remet son compteur de non-lus à zéro)
