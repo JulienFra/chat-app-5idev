@@ -28,4 +28,5 @@ export interface Conversation {
   createdAt: string;
   memberships: Membership[];
   messages?: Message[];
+  unreadCount?: number;
 }

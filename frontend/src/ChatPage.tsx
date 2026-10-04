@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, conversationTitle, errorMessage, getCurrentUserId } from './api';
+import {
+  api,
+  conversationTitle,
+  errorMessage,
+  getCurrentUserId,
+  markConversationRead,
+} from './api';
 import { connectSocket, disconnectSocket } from './socket';
 import type { Conversation, Message } from './types';
 import ConversationView from './components/ConversationView';
@@ -16,6 +22,15 @@ interface NotificationToast {
   content: string;
 }
 
+// NOUVEAU : transforme les compteurs renvoyés par le serveur en { [convId]: nombre }
+function unreadFrom(list: Conversation[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const c of list) {
+    if (c.unreadCount) counts[c.id] = c.unreadCount;
+  }
+  return counts;
+}
+
 export default function ChatPage({ onLogout }: Props) {
   const meId = getCurrentUserId();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -23,10 +38,10 @@ export default function ChatPage({ onLogout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // État des messages non lus par conversation : { [convId]: number }
+  // Messages non lus par conversation : { [convId]: number }
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
-  // État du toast de notification en haut à droite
+  // Toast de notification en haut à droite
   const [toast, setToast] = useState<NotificationToast | null>(null);
 
   // Modal de création de groupe
@@ -45,15 +60,6 @@ export default function ChatPage({ onLogout }: Props) {
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
-    // Quand on ouvre une conversation, on réinitialise son compteur de messages non lus
-    if (selectedId) {
-      setUnreadCounts((prev) => {
-        if (!prev[selectedId]) return prev;
-        const next = { ...prev };
-        delete next[selectedId];
-        return next;
-      });
-    }
   }, [selectedId]);
 
   // Demander la permission pour les notifications natives du navigateur
@@ -63,12 +69,14 @@ export default function ChatPage({ onLogout }: Props) {
     }
   }, []);
 
-  // Rechargement des conversations
+  // Rechargement des conversations (et de leurs compteurs, calculés par le serveur)
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setConversations(await api<Conversation[]>('/conversations'));
+      const data = await api<Conversation[]>('/conversations');
+      setConversations(data);
+      setUnreadCounts(unreadFrom(data)); // NOUVEAU
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -81,7 +89,9 @@ export default function ChatPage({ onLogout }: Props) {
     let cancelled = false;
     api<Conversation[]>('/conversations')
       .then((data) => {
-        if (!cancelled) setConversations(data);
+        if (cancelled) return;
+        setConversations(data);
+        setUnreadCounts(unreadFrom(data)); // NOUVEAU
       })
       .catch((err) => {
         if (!cancelled) setError(errorMessage(err));
@@ -92,6 +102,18 @@ export default function ChatPage({ onLogout }: Props) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // NOUVEAU : ouvrir une conversation remet son badge à zéro, ici et sur le serveur
+  const openConversation = useCallback((id: string) => {
+    setSelectedId(id);
+    setUnreadCounts((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    void markConversationRead(id);
   }, []);
 
   // Réception d'un nouveau message Socket.io
@@ -113,9 +135,13 @@ export default function ChatPage({ onLogout }: Props) {
         });
       }
 
-      // 2. Déclencher les notifications si ce n'est pas nous et que la conv n'est pas ouverte
+      // NOUVEAU : message reçu dans la conversation ouverte → on le considère lu
+      if (!isFromMe && isCurrentConv) {
+        void markConversationRead(message.conversationId);
+      }
+
+      // 2. Notifications si ce n'est pas nous et que la conversation n'est pas ouverte
       if (!isFromMe && !isCurrentConv) {
-        // Incrémenter le badge non-lu
         setUnreadCounts((prev) => ({
           ...prev,
           [message.conversationId]: (prev[message.conversationId] || 0) + 1,
@@ -125,7 +151,6 @@ export default function ChatPage({ onLogout }: Props) {
         const title = targetConv ? conversationTitle(targetConv, meId) : 'Nouveau message';
         const sender = message.author?.displayName ?? 'Un collègue';
 
-        // Notification Toast dans l'UI
         setToast({
           id: message.id,
           conversationId: message.conversationId,
@@ -134,7 +159,6 @@ export default function ChatPage({ onLogout }: Props) {
           content: message.content,
         });
 
-        // Notification native du navigateur (si document caché ou minimisé)
         if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
           try {
             new Notification(`${sender} (${title})`, {
@@ -204,7 +228,7 @@ export default function ChatPage({ onLogout }: Props) {
       <li key={c.id}>
         <button
           type="button"
-          onClick={() => setSelectedId(c.id)}
+          onClick={() => openConversation(c.id)}
           className={`relative flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left transition ${
             active ? 'bg-zinc-700/70 text-white' : 'text-zinc-300 hover:bg-zinc-800'
           }`}
@@ -227,7 +251,6 @@ export default function ChatPage({ onLogout }: Props) {
             </span>
           </div>
 
-          {/* Badge de messages non lus */}
           {unread > 0 && (
             <span className="shrink-0 rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-sm shadow-violet-600/50">
               {unread > 99 ? '99+' : unread}
@@ -240,12 +263,12 @@ export default function ChatPage({ onLogout }: Props) {
 
   return (
     <div className="fixed inset-0 grid grid-cols-1 bg-zinc-950 text-zinc-100 md:grid-cols-[300px_1fr]">
-      {/* Toast de Notification Flottant */}
+      {/* Toast de notification flottant */}
       {toast && (
         <div
           role="status"
           onClick={() => {
-            setSelectedId(toast.conversationId);
+            openConversation(toast.conversationId);
             setToast(null);
           }}
           className="fixed top-5 right-5 z-50 flex max-w-sm cursor-pointer items-start gap-3 rounded-xl border border-violet-500/40 bg-zinc-900/95 p-4 shadow-2xl backdrop-blur-md transition hover:border-violet-400 animate-in fade-in slide-in-from-top-3 duration-300"
@@ -337,7 +360,7 @@ export default function ChatPage({ onLogout }: Props) {
         </div>
       </aside>
 
-      {/* Vue de la discussion sélectionnée */}
+      {/* Conversation sélectionnée */}
       <main className={`min-h-0 min-w-0 flex-col ${selected ? 'flex' : 'hidden md:flex'}`}>
         {selected ? (
           <ConversationView
@@ -375,9 +398,7 @@ export default function ChatPage({ onLogout }: Props) {
                 />
               </div>
 
-              {createError && (
-                <p className="text-xs text-red-400">{createError}</p>
-              )}
+              {createError && <p className="text-xs text-red-400">{createError}</p>}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button

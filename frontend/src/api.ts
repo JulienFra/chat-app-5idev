@@ -104,3 +104,14 @@ export function conversationTitle(conversation: Conversation, meId: string | nul
   const other = conversation.memberships.find((m) => m.userId !== meId);
   return other?.user.displayName ?? 'Conversation';
 }
+
+// Marque une conversation comme lue côté serveur.
+// Une erreur ici ne doit pas gêner l'utilisateur : au pire,
+// le badge réapparaîtra au prochain chargement.
+export async function markConversationRead(conversationId: string): Promise<void> {
+  try {
+    await api<void>(`/conversations/${conversationId}/read`, { method: 'POST' });
+  } catch {
+    // ignoré volontairement
+  }
+}
