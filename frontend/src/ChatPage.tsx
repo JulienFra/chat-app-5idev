@@ -9,20 +9,15 @@ import {
 import { connectSocket, disconnectSocket } from './socket';
 import type { Conversation, Message } from './types';
 import ConversationView from './components/ConversationView';
+import ToastStack, { type NotificationToast } from './components/ToastStack';
 
 interface Props {
   onLogout: () => void;
 }
 
-interface NotificationToast {
-  id: string;
-  conversationId: string;
-  senderName: string;
-  title: string;
-  content: string;
-}
+const MAX_TOASTS = 3;
 
-// NOUVEAU : transforme les compteurs renvoyés par le serveur en { [convId]: nombre }
+// Transforme les compteurs renvoyés par le serveur en { [convId]: nombre }
 function unreadFrom(list: Conversation[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const c of list) {
@@ -41,8 +36,8 @@ export default function ChatPage({ onLogout }: Props) {
   // Messages non lus par conversation : { [convId]: number }
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
-  // Toast de notification en haut à droite
-  const [toast, setToast] = useState<NotificationToast | null>(null);
+  // Pile de toasts (le plus récent en premier)
+  const [toasts, setToasts] = useState<NotificationToast[]>([]);
 
   // Modal de création de groupe
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -76,7 +71,7 @@ export default function ChatPage({ onLogout }: Props) {
     try {
       const data = await api<Conversation[]>('/conversations');
       setConversations(data);
-      setUnreadCounts(unreadFrom(data)); // NOUVEAU
+      setUnreadCounts(unreadFrom(data));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -91,7 +86,7 @@ export default function ChatPage({ onLogout }: Props) {
       .then((data) => {
         if (cancelled) return;
         setConversations(data);
-        setUnreadCounts(unreadFrom(data)); // NOUVEAU
+        setUnreadCounts(unreadFrom(data));
       })
       .catch((err) => {
         if (!cancelled) setError(errorMessage(err));
@@ -104,17 +99,36 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, []);
 
-  // NOUVEAU : ouvrir une conversation remet son badge à zéro, ici et sur le serveur
-  const openConversation = useCallback((id: string) => {
-    setSelectedId(id);
-    setUnreadCounts((prev) => {
-      if (!prev[id]) return prev;
-      const next = { ...prev };
-      delete next[id];
-      return next;
+  // Ajoute un toast en haut de la pile. Un nouveau message d'une conversation
+  // qui a déjà un toast le met à jour au lieu d'en créer un deuxième.
+  const pushToast = useCallback((toast: Omit<NotificationToast, 'count'>) => {
+    setToasts((prev) => {
+      const existing = prev.find((t) => t.conversationId === toast.conversationId);
+      const merged: NotificationToast = { ...toast, count: (existing?.count ?? 0) + 1 };
+      const others = prev.filter((t) => t.conversationId !== toast.conversationId);
+      return [merged, ...others].slice(0, MAX_TOASTS);
     });
-    void markConversationRead(id);
   }, []);
+
+  const dismissToast = useCallback((conversationId: string) => {
+    setToasts((prev) => prev.filter((t) => t.conversationId !== conversationId));
+  }, []);
+
+  // Ouvrir une conversation : badge et toast effacés, lecture enregistrée sur le serveur
+  const openConversation = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      setUnreadCounts((prev) => {
+        if (!prev[id]) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      dismissToast(id);
+      void markConversationRead(id);
+    },
+    [dismissToast],
+  );
 
   // Réception d'un nouveau message Socket.io
   const handleNewMessage = useCallback(
@@ -135,7 +149,7 @@ export default function ChatPage({ onLogout }: Props) {
         });
       }
 
-      // NOUVEAU : message reçu dans la conversation ouverte → on le considère lu
+      // Message reçu dans la conversation ouverte : on le considère lu
       if (!isFromMe && isCurrentConv) {
         void markConversationRead(message.conversationId);
       }
@@ -149,9 +163,9 @@ export default function ChatPage({ onLogout }: Props) {
 
         const targetConv = conversationsRef.current.find((c) => c.id === message.conversationId);
         const title = targetConv ? conversationTitle(targetConv, meId) : 'Nouveau message';
-        const sender = message.author?.displayName ?? 'Un collègue';
+        const sender = message.author?.displayName ?? 'Un membre';
 
-        setToast({
+        pushToast({
           id: message.id,
           conversationId: message.conversationId,
           senderName: sender,
@@ -159,6 +173,7 @@ export default function ChatPage({ onLogout }: Props) {
           content: message.content,
         });
 
+        // Notification native du navigateur (si l'onglet n'est pas visible)
         if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
           try {
             new Notification(`${sender} (${title})`, {
@@ -169,15 +184,8 @@ export default function ChatPage({ onLogout }: Props) {
         }
       }
     },
-    [load, meId],
+    [load, meId, pushToast],
   );
-
-  // Auto-effacement du toast au bout de 4 secondes
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   // Écouter Socket.io
   useEffect(() => {
@@ -263,38 +271,8 @@ export default function ChatPage({ onLogout }: Props) {
 
   return (
     <div className="fixed inset-0 grid grid-cols-1 bg-zinc-950 text-zinc-100 md:grid-cols-[300px_1fr]">
-      {/* Toast de notification flottant */}
-      {toast && (
-        <div
-          role="status"
-          onClick={() => {
-            openConversation(toast.conversationId);
-            setToast(null);
-          }}
-          className="fixed top-5 right-5 z-50 flex max-w-sm cursor-pointer items-start gap-3 rounded-xl border border-violet-500/40 bg-zinc-900/95 p-4 shadow-2xl backdrop-blur-md transition hover:border-violet-400 animate-in fade-in slide-in-from-top-3 duration-300"
-        >
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-violet-600 text-sm font-bold text-white">
-            💬
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-violet-300">{toast.title}</p>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setToast(null);
-                }}
-                className="text-xs text-zinc-500 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-            <p className="mt-0.5 text-xs font-bold text-white">{toast.senderName}</p>
-            <p className="mt-0.5 truncate text-xs text-zinc-400">{toast.content}</p>
-          </div>
-        </div>
-      )}
+      {/* Pile de toasts */}
+      <ToastStack toasts={toasts} onOpen={openConversation} onDismiss={dismissToast} />
 
       {/* Barre latérale */}
       <aside
