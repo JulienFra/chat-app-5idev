@@ -11,6 +11,9 @@ import { PrismaService } from '../prisma/prisma.service';
 // Nom de la room d'une conversation
 export const conversationRoom = (conversationId: string) => `conv:${conversationId}`;
 
+// Nom de la room personnelle d'un utilisateur (tous ses onglets et appareils)
+export const userRoom = (userId: string) => `user:${userId}`;
+
 @WebSocketGateway()
 export class RealtimeGateway implements OnGatewayConnection {
   @WebSocketServer()
@@ -34,12 +37,15 @@ export class RealtimeGateway implements OnGatewayConnection {
       });
       client.data.userId = payload.sub;
 
-      // 2. On inscrit l'utilisateur dans la room de chacune de ses conversations
+      // 2. Room personnelle + une room par conversation dont l'utilisateur est membre
       const memberships = await this.prisma.membership.findMany({
         where: { userId: payload.sub },
         select: { conversationId: true },
       });
-      await client.join(memberships.map((m) => conversationRoom(m.conversationId)));
+      await client.join([
+        userRoom(payload.sub),
+        ...memberships.map((m) => conversationRoom(m.conversationId)),
+      ]);
     } catch {
       // Token absent, invalide ou expiré : on coupe la connexion
       client.disconnect(true);
@@ -49,5 +55,14 @@ export class RealtimeGateway implements OnGatewayConnection {
   // Appelé par MessagesService APRÈS l'enregistrement en base
   emitNewMessage(message: { conversationId: string }) {
     this.server.to(conversationRoom(message.conversationId)).emit('message:new', message);
+  }
+
+  // Appelé quand une conversation est créée ou qu'on y ajoute des membres :
+  // leurs sockets déjà connectés rejoignent la room, et leur liste se met à jour.
+  addMembersToConversation(userIds: string[], conversationId: string) {
+    if (userIds.length === 0) return;
+    const rooms = userIds.map(userRoom);
+    this.server.in(rooms).socketsJoin(conversationRoom(conversationId));
+    this.server.to(rooms).emit('conversation:new', { conversationId });
   }
 }

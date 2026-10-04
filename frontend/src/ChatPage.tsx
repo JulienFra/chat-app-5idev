@@ -64,7 +64,7 @@ export default function ChatPage({ onLogout }: Props) {
     }
   }, []);
 
-  // Rechargement des conversations (et de leurs compteurs, calculés par le serveur)
+  // Rechargement avec écran de chargement (bouton « Réessayer »)
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -76,6 +76,18 @@ export default function ChatPage({ onLogout }: Props) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  // NOUVEAU : rechargement silencieux, sans vider la barre latérale.
+  // Utilisé quand une conversation apparaît en cours de route.
+  const refresh = useCallback(async () => {
+    try {
+      const data = await api<Conversation[]>('/conversations');
+      setConversations(data);
+      setUnreadCounts(unreadFrom(data));
+    } catch {
+      // en cas d'échec, la liste actuelle reste affichée
     }
   }, []);
 
@@ -139,7 +151,7 @@ export default function ChatPage({ onLogout }: Props) {
       // 1. Mettre à jour l'aperçu et remonter la conversation
       const known = conversationsRef.current.some((c) => c.id === message.conversationId);
       if (!known) {
-        void load();
+        void refresh(); // NOUVEAU : silencieux au lieu de load()
       } else {
         setConversations((prev) => {
           const conv = prev.find((c) => c.id === message.conversationId);
@@ -184,10 +196,10 @@ export default function ChatPage({ onLogout }: Props) {
         }
       }
     },
-    [load, meId, pushToast],
+    [refresh, meId, pushToast],
   );
 
-  // Écouter Socket.io
+  // Écouter les nouveaux messages
   useEffect(() => {
     const socket = connectSocket();
     socket.on('message:new', handleNewMessage);
@@ -195,6 +207,18 @@ export default function ChatPage({ onLogout }: Props) {
       socket.off('message:new', handleNewMessage);
     };
   }, [handleNewMessage]);
+
+  // NOUVEAU : une conversation vient d'être créée ou on vient d'y être ajouté
+  useEffect(() => {
+    const socket = connectSocket();
+    const onNewConversation = () => {
+      void refresh();
+    };
+    socket.on('conversation:new', onNewConversation);
+    return () => {
+      socket.off('conversation:new', onNewConversation);
+    };
+  }, [refresh]);
 
   useEffect(() => {
     return () => disconnectSocket();
@@ -211,7 +235,8 @@ export default function ChatPage({ onLogout }: Props) {
         method: 'POST',
         body: { name: newGroupName.trim() },
       });
-      setConversations((prev) => [created, ...prev]);
+      // NOUVEAU : sans doublon, au cas où conversation:new serait arrivé avant
+      setConversations((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);
       setSelectedId(created.id);
       setIsModalOpen(false);
       setNewGroupName('');
