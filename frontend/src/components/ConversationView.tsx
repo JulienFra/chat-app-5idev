@@ -39,11 +39,6 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
   const myMembership = memberships.find((m) => m.userId === meId);
   const isAdmin = conversation.isGroup && myMembership?.role === 'ADMIN';
 
-  // Synchroniser les membres si la conversation change
-  useEffect(() => {
-    setMemberships(conversation.memberships ?? []);
-  }, [conversation]);
-
   // Charger l'historique
   useEffect(() => {
     let cancelled = false;
