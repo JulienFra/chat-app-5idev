@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ConversationsService } from './conversations.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { CreateDirectDto } from './dto/create-direct.dto';
@@ -39,5 +49,15 @@ export class ConversationsController {
       conversationId,
       identifier,
     );
+  }
+
+  // POST /api/conversations/:id/read : marque la conversation comme lue
+  @Post(':id/read')
+  @HttpCode(204)
+  markAsRead(
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) conversationId: string,
+  ) {
+    return this.conversationsService.markAsRead(req.user.sub, conversationId);
   }
 }

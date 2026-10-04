@@ -31,6 +31,7 @@ model Membership {
   id             String       @id @default(uuid())
   role           Role         @default(MEMBER)
   joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?    // dernière lecture de la conversation (null = jamais lue)
 
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId         String

@@ -42,9 +42,9 @@ export class ConversationsService {
     });
   }
 
-  // 2. Lister les conversations de l'utilisateur
+  // 2. Lister les conversations de l'utilisateur, avec leur nombre de non-lus
   async getUserConversations(userId: string) {
-    return this.prisma.conversation.findMany({
+    const conversations = await this.prisma.conversation.findMany({
       where: { memberships: { some: { userId } } },
       include: {
         ...this.conversationInclude,
@@ -52,6 +52,29 @@ export class ConversationsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Une seule requête SQL pour compter les non-lus de toutes les conversations.
+    // Non lu = message d'un AUTRE membre, envoyé après la dernière lecture
+    // (ou après l'arrivée dans la conversation, si on ne l'a jamais ouverte).
+    const rows = await this.prisma.$queryRaw<{ conversationId: string; count: bigint }[]>`
+      SELECT m."conversationId", COUNT(msg.id) AS count
+      FROM "Membership" m
+      JOIN "Message" msg
+        ON msg."conversationId" = m."conversationId"
+       AND msg."authorId" <> m."userId"
+       AND msg."createdAt" > COALESCE(m."lastReadAt", m."joinedAt")
+      WHERE m."userId" = ${userId}
+      GROUP BY m."conversationId"
+    `;
+
+    const unreadByConversation = new Map(
+      rows.map((r) => [r.conversationId, Number(r.count)]),
+    );
+
+    return conversations.map((c) => ({
+      ...c,
+      unreadCount: unreadByConversation.get(c.id) ?? 0,
+    }));
   }
 
   // 3. Trouver ou créer une conversation 1:1
@@ -160,6 +183,16 @@ export class ConversationsService {
       include: {
         user: { select: { id: true, displayName: true, email: true } },
       },
+    });
+  }
+
+  // 7. Marquer une conversation comme lue (remet son compteur de non-lus à zéro)
+  async markAsRead(userId: string, conversationId: string) {
+    await this.assertIsMember(userId, conversationId);
+
+    await this.prisma.membership.update({
+      where: { userId_conversationId: { userId, conversationId } },
+      data: { lastReadAt: new Date() },
     });
   }
 }
