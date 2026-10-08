@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -13,7 +14,7 @@ import { CreateConversationDto } from './dto/create-conversation.dto';
 export class ConversationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway, // NOUVEAU
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   // Ce qu'on renvoie avec chaque conversation : les membres, sans passwordHash
@@ -31,9 +32,23 @@ export class ConversationsService {
       ? Array.from(new Set(dto.memberIds.filter((id) => id !== userId)))
       : [];
 
+    // NOUVEAU : un même propriétaire ne peut pas avoir deux équipes du même nom
+    // (comparaison sans tenir compte des majuscules ni des espaces autour)
+    const name = dto.name.trim();
+    const duplicate = await this.prisma.conversation.findFirst({
+      where: {
+        isGroup: true,
+        name: { equals: name, mode: 'insensitive' },
+        memberships: { some: { userId, role: Role.ADMIN } },
+      },
+    });
+    if (duplicate) {
+      throw new ConflictException(`Tu as déjà une équipe nommée « ${name} »`);
+    }
+
     const conversation = await this.prisma.conversation.create({
       data: {
-        name: dto.name,
+        name, // NOUVEAU : le nom nettoyé
         isGroup: true,
         memberships: {
           create: [
@@ -45,7 +60,7 @@ export class ConversationsService {
       include: this.conversationInclude,
     });
 
-    // NOUVEAU : le créateur ET les invités rejoignent la room tout de suite
+    // Le créateur ET les invités rejoignent la room tout de suite
     this.realtime.addMembersToConversation([userId, ...memberIds], conversation.id);
 
     return conversation;
@@ -129,7 +144,7 @@ export class ConversationsService {
       include: this.conversationInclude,
     });
 
-    // NOUVEAU : seulement à la création (une conversation existante a déjà sa room)
+    // Seulement à la création (une conversation existante a déjà sa room)
     this.realtime.addMembersToConversation([userId, otherUserId], conversation.id);
 
     return conversation;
@@ -199,7 +214,7 @@ export class ConversationsService {
       },
     });
 
-    // NOUVEAU : le nouveau membre rejoint la room et voit le groupe apparaître
+    // Le nouveau membre rejoint la room et voit le groupe apparaître
     this.realtime.addMembersToConversation([targetUser.id], conversationId);
 
     return membership;
