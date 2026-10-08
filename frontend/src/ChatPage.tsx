@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   api,
+  ApiError,
   conversationTitle,
   errorMessage,
   getCurrentUserId,
   markConversationRead,
 } from './api';
 import { connectSocket, disconnectSocket } from './socket';
-import type { Conversation, Message } from './types';
+import type { Conversation, Invitation, Message } from './types';
 import ConversationView from './components/ConversationView';
+import InvitationsList from './components/InvitationsList';
 import ToastStack, { type NotificationToast } from './components/ToastStack';
 import UserPanel from './components/UserPanel';
 
@@ -17,6 +19,10 @@ interface Props {
 }
 
 const MAX_TOASTS = 3;
+
+// Les toasts d'invitation ont une clé « invite:<id> » pour ne pas être
+// confondus avec ceux des conversations
+const INVITE_PREFIX = 'invite:';
 
 // Transforme les compteurs renvoyés par le serveur en { [convId]: nombre }
 function unreadFrom(list: Conversation[]): Record<string, number> {
@@ -33,6 +39,14 @@ export default function ChatPage({ onLogout }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Onglet de la barre latérale
+  const [tab, setTab] = useState<'chats' | 'invitations'>('chats');
+
+  // Invitations reçues
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [invitationError, setInvitationError] = useState<string | null>(null);
 
   // Messages non lus par conversation : { [convId]: number }
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
@@ -92,7 +106,7 @@ export default function ChatPage({ onLogout }: Props) {
     }
   }, []);
 
-  // Premier chargement
+  // Premier chargement des conversations
   useEffect(() => {
     let cancelled = false;
     api<Conversation[]>('/conversations')
@@ -106,6 +120,21 @@ export default function ChatPage({ onLogout }: Props) {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Premier chargement des invitations reçues
+  useEffect(() => {
+    let cancelled = false;
+    api<Invitation[]>('/invitations')
+      .then((data) => {
+        if (!cancelled) setInvitations(data);
+      })
+      .catch(() => {
+        // sans invitations, l'onglet reste simplement vide
       });
     return () => {
       cancelled = true;
@@ -130,6 +159,7 @@ export default function ChatPage({ onLogout }: Props) {
   // Ouvrir une conversation : badge et toast effacés, lecture enregistrée sur le serveur
   const openConversation = useCallback(
     (id: string) => {
+      setTab('chats');
       setSelectedId(id);
       setUnreadCounts((prev) => {
         if (!prev[id]) return prev;
@@ -141,6 +171,20 @@ export default function ChatPage({ onLogout }: Props) {
       void markConversationRead(id);
     },
     [dismissToast],
+  );
+
+  // Clic sur un toast : invitation → onglet Invitations, sinon → la conversation
+  const handleToastOpen = useCallback(
+    (key: string) => {
+      if (key.startsWith(INVITE_PREFIX)) {
+        dismissToast(key);
+        setSelectedId(null); // sur mobile, la liste doit être visible
+        setTab('invitations');
+        return;
+      }
+      openConversation(key);
+    },
+    [dismissToast, openConversation],
   );
 
   // Réception d'un nouveau message Socket.io
@@ -221,9 +265,75 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, [refresh]);
 
+  // Invitations reçues ou annulées en direct
+  useEffect(() => {
+    const socket = connectSocket();
+
+    const onInvitation = (invitation: Invitation) => {
+      setInvitations((prev) => [invitation, ...prev.filter((i) => i.id !== invitation.id)]);
+
+      const team = invitation.conversation.name?.trim() || 'une équipe';
+      const inviter = invitation.inviter.displayName;
+      pushToast({
+        id: invitation.id,
+        conversationId: `${INVITE_PREFIX}${invitation.id}`,
+        senderName: inviter,
+        title: team,
+        content: "t'invite à rejoindre l'équipe",
+      });
+
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        try {
+          new Notification(`Invitation : ${team}`, {
+            body: `${inviter} t'invite à rejoindre l'équipe`,
+            icon: '/favicon.ico',
+          });
+        } catch {}
+      }
+    };
+
+    const onInvitationRemoved = ({ id }: { id: string }) => {
+      setInvitations((prev) => prev.filter((i) => i.id !== id));
+      dismissToast(`${INVITE_PREFIX}${id}`);
+    };
+
+    socket.on('invitation:new', onInvitation);
+    socket.on('invitation:removed', onInvitationRemoved);
+    return () => {
+      socket.off('invitation:new', onInvitation);
+      socket.off('invitation:removed', onInvitationRemoved);
+    };
+  }, [pushToast, dismissToast]);
+
   useEffect(() => {
     return () => disconnectSocket();
   }, []);
+
+  // Accepter ou refuser une invitation
+  const respondToInvitation = async (invitation: Invitation, accept: boolean) => {
+    setRespondingId(invitation.id);
+    setInvitationError(null);
+    try {
+      await api<void>(`/invitations/${invitation.id}/${accept ? 'accept' : 'decline'}`, {
+        method: 'POST',
+      });
+      setInvitations((prev) => prev.filter((i) => i.id !== invitation.id));
+      dismissToast(`${INVITE_PREFIX}${invitation.id}`);
+      if (accept) {
+        // On recharge la liste pour avoir l'équipe, puis on l'ouvre
+        await refresh();
+        openConversation(invitation.conversationId);
+      }
+    } catch (err) {
+      setInvitationError(errorMessage(err));
+      // Expirée ou annulée entre-temps : on la retire de la liste
+      if (err instanceof ApiError && err.status === 404) {
+        setInvitations((prev) => prev.filter((i) => i.id !== invitation.id));
+      }
+    } finally {
+      setRespondingId(null);
+    }
+  };
 
   const handleCreateGroup = async (e: FormEvent) => {
     e.preventDefault();
@@ -295,10 +405,15 @@ export default function ChatPage({ onLogout }: Props) {
     );
   };
 
+  const tabClass = (active: boolean) =>
+    `flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+      active ? 'bg-zinc-700/70 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+    }`;
+
   return (
     <div className="fixed inset-0 grid grid-cols-1 bg-zinc-950 text-zinc-100 md:grid-cols-[300px_1fr]">
       {/* Pile de toasts */}
-      <ToastStack toasts={toasts} onOpen={openConversation} onDismiss={dismissToast} />
+      <ToastStack toasts={toasts} onOpen={handleToastOpen} onDismiss={dismissToast} />
 
       {/* Barre latérale */}
       <aside
@@ -317,47 +432,77 @@ export default function ChatPage({ onLogout }: Props) {
           </button>
         </header>
 
+        {/* Onglets */}
+        <div className="flex gap-1 border-b border-zinc-800 p-2">
+          <button type="button" onClick={() => setTab('chats')} className={tabClass(tab === 'chats')}>
+            Discussions
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('invitations')}
+            className={tabClass(tab === 'invitations')}
+          >
+            Invitations
+            {invitations.length > 0 && (
+              <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] leading-none font-bold text-zinc-950">
+                {invitations.length}
+              </span>
+            )}
+          </button>
+        </div>
+
         <div className="flex-1 overflow-y-auto px-2 pb-4">
-          {loading && <p className="px-2 py-4 text-sm text-zinc-500">Chargement…</p>}
-
-          {error && (
-            <div className="m-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">
-              {error}{' '}
-              <button type="button" onClick={() => void load()} className="underline">
-                Réessayer
-              </button>
-            </div>
-          )}
-
-          {!loading && !error && (
+          {tab === 'invitations' ? (
+            <InvitationsList
+              invitations={invitations}
+              respondingId={respondingId}
+              error={invitationError}
+              onRespond={(inv, accept) => void respondToInvitation(inv, accept)}
+            />
+          ) : (
             <>
-              <div className="flex items-center justify-between px-2 pt-4 pb-1">
-                <h2 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">
-                  Équipes
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(true)}
-                  className="rounded px-1.5 py-0.5 text-xs font-bold text-violet-400 hover:bg-zinc-800 hover:text-violet-300"
-                  title="Créer une nouvelle équipe"
-                >
-                  + Nouveau
-                </button>
-              </div>
+              {loading && <p className="px-2 py-4 text-sm text-zinc-500">Chargement…</p>}
 
-              {teams.length === 0 ? (
-                <p className="px-2 text-sm text-zinc-500">Aucune équipe</p>
-              ) : (
-                <ul>{teams.map(renderItem)}</ul>
+              {error && (
+                <div className="m-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">
+                  {error}{' '}
+                  <button type="button" onClick={() => void load()} className="underline">
+                    Réessayer
+                  </button>
+                </div>
               )}
 
-              <h2 className="px-2 pt-4 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase">
-                Messages privés
-              </h2>
-              {directs.length === 0 ? (
-                <p className="px-2 text-sm text-zinc-500">Aucun message privé</p>
-              ) : (
-                <ul>{directs.map(renderItem)}</ul>
+              {!loading && !error && (
+                <>
+                  <div className="flex items-center justify-between px-2 pt-4 pb-1">
+                    <h2 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">
+                      Équipes
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(true)}
+                      className="rounded px-1.5 py-0.5 text-xs font-bold text-violet-400 hover:bg-zinc-800 hover:text-violet-300"
+                      title="Créer une nouvelle équipe"
+                    >
+                      + Nouveau
+                    </button>
+                  </div>
+
+                  {teams.length === 0 ? (
+                    <p className="px-2 text-sm text-zinc-500">Aucune équipe</p>
+                  ) : (
+                    <ul>{teams.map(renderItem)}</ul>
+                  )}
+
+                  <h2 className="px-2 pt-4 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase">
+                    Messages privés
+                  </h2>
+                  {directs.length === 0 ? (
+                    <p className="px-2 text-sm text-zinc-500">Aucun message privé</p>
+                  ) : (
+                    <ul>{directs.map(renderItem)}</ul>
+                  )}
+                </>
               )}
             </>
           )}

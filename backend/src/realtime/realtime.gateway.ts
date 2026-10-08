@@ -65,4 +65,10 @@ export class RealtimeGateway implements OnGatewayConnection {
     this.server.in(rooms).socketsJoin(conversationRoom(conversationId));
     this.server.to(rooms).emit('conversation:new', { conversationId });
   }
+
+  // Envoie un événement à un seul utilisateur, sur tous ses onglets
+  // (ex : invitation reçue ou annulée)
+  emitToUser(userId: string, event: string, payload: unknown) {
+    this.server.to(userRoom(userId)).emit(event, payload);
+  }
 }

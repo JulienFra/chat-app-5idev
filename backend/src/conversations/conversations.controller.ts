@@ -37,19 +37,8 @@ export class ConversationsController {
     return this.conversationsService.getUserConversations(req.user.sub);
   }
 
-  // Ajout d'un membre avec vérification de permission ADMIN (S4)
-  @Post(':id/members')
-  addMember(
-    @Req() req: any,
-    @Param('id') conversationId: string,
-    @Body('identifier') identifier: string,
-  ) {
-    return this.conversationsService.addMember(
-      req.user.sub,
-      conversationId,
-      identifier,
-    );
-  }
+  // L'ajout direct de membre a été remplacé par les invitations
+  // (voir InvitationsController) : on doit accepter pour rejoindre un groupe.
 
   // POST /api/conversations/:id/read : marque la conversation comme lue
   @Post(':id/read')

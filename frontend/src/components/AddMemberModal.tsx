@@ -1,18 +1,17 @@
 import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../api';
-import type { Membership, UserSummary } from '../types';
+import type { Invitation, UserSummary } from '../types';
 
 interface Props {
   conversationId: string;
-  memberIds: string[]; // pour afficher « Déjà membre »
+  memberIds: string[]; // pour afficher « Membre »
   onClose: () => void;
-  onAdded: (membership: Membership) => void;
 }
 
 const MIN_CHARS = 2;
 const DEBOUNCE_MS = 250;
 
-export default function AddMemberModal({ conversationId, memberIds, onClose, onAdded }: Props) {
+export default function AddMemberModal({ conversationId, memberIds, onClose }: Props) {
   const [query, setQuery] = useState('');
   // On garde la recherche qui a produit les résultats, pour ne jamais
   // afficher les résultats d'une ancienne frappe
@@ -21,11 +20,27 @@ export default function AddMemberModal({ conversationId, memberIds, onClose, onA
     users: [],
   });
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [addingId, setAddingId] = useState<string | null>(null);
-  const [addError, setAddError] = useState<string | null>(null);
+  const [pending, setPending] = useState<Invitation[]>([]); // invitations en attente du groupe
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const term = query.trim();
   const tooShort = term.length < MIN_CHARS;
+
+  // Invitations déjà envoyées et en attente
+  useEffect(() => {
+    let cancelled = false;
+    api<Invitation[]>(`/conversations/${conversationId}/invitations`)
+      .then((list) => {
+        if (!cancelled) setPending(list);
+      })
+      .catch(() => {
+        // sans cette liste, on n'affiche simplement pas « Invité »
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
   // Recherche avec un petit délai : on attend que l'utilisateur arrête de taper
   useEffect(() => {
@@ -50,21 +65,51 @@ export default function AddMemberModal({ conversationId, memberIds, onClose, onA
   const users = upToDate ? results.users : [];
   const searching = !tooShort && !upToDate && !searchError;
 
-  const handleAdd = async (user: UserSummary) => {
-    setAddingId(user.id);
-    setAddError(null);
+  const invite = async (user: UserSummary) => {
+    setBusyId(user.id);
+    setActionError(null);
     try {
-      const membership = await api<Membership>(`/conversations/${conversationId}/members`, {
+      const invitation = await api<Invitation>(`/conversations/${conversationId}/invitations`, {
         method: 'POST',
-        body: { identifier: user.id },
+        body: { inviteeId: user.id },
       });
-      onAdded(membership);
+      setPending((prev) => [invitation, ...prev]);
     } catch (err) {
-      setAddError(errorMessage(err));
+      setActionError(errorMessage(err));
     } finally {
-      setAddingId(null);
+      setBusyId(null);
     }
   };
+
+  const cancel = async (invitation: Invitation) => {
+    setBusyId(invitation.inviteeId);
+    setActionError(null);
+    try {
+      await api<void>(`/invitations/${invitation.id}`, { method: 'DELETE' });
+      setPending((prev) => prev.filter((i) => i.id !== invitation.id));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const avatar = (name: string) => (
+    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-indigo-500 text-sm font-semibold text-white">
+      {name.charAt(0).toUpperCase()}
+    </span>
+  );
+
+  const cancelButton = (invitation: Invitation) => (
+    <button
+      type="button"
+      onClick={() => void cancel(invitation)}
+      disabled={busyId !== null}
+      className="text-xs text-zinc-400 underline hover:text-white disabled:opacity-50"
+    >
+      {busyId === invitation.inviteeId ? '…' : 'Annuler'}
+    </button>
+  );
 
   return (
     <div
@@ -77,8 +122,10 @@ export default function AddMemberModal({ conversationId, memberIds, onClose, onA
       >
         <div className="flex items-start justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-white">Ajouter un membre</h3>
-            <p className="mt-1 text-xs text-zinc-400">Cherche un joueur par son pseudo.</p>
+            <h3 className="text-lg font-semibold text-white">Inviter un joueur</h3>
+            <p className="mt-1 text-xs text-zinc-400">
+              Il devra accepter l'invitation pour rejoindre l'équipe.
+            </p>
           </div>
           <button
             type="button"
@@ -97,7 +144,7 @@ export default function AddMemberModal({ conversationId, memberIds, onClose, onA
           onChange={(e) => {
             setQuery(e.target.value);
             setSearchError(null);
-            setAddError(null);
+            setActionError(null);
           }}
           maxLength={20}
           placeholder="Pseudo, ex : nouveau"
@@ -105,11 +152,31 @@ export default function AddMemberModal({ conversationId, memberIds, onClose, onA
         />
 
         <div className="mt-3 max-h-64 min-h-[3rem] overflow-y-auto">
-          {tooShort && (
-            <p className="px-1 py-2 text-xs text-zinc-500">
-              Tape au moins {MIN_CHARS} caractères.
-            </p>
-          )}
+          {/* Barre vide : les invitations déjà envoyées */}
+          {tooShort &&
+            (pending.length === 0 ? (
+              <p className="px-1 py-2 text-xs text-zinc-500">
+                Tape au moins {MIN_CHARS} caractères pour chercher un joueur.
+              </p>
+            ) : (
+              <>
+                <p className="px-1 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase">
+                  En attente de réponse
+                </p>
+                <ul className="space-y-1">
+                  {pending.map((inv) => (
+                    <li key={inv.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
+                      {avatar(inv.invitee.displayName)}
+                      <span className="min-w-0 flex-1 truncate text-sm text-zinc-100">
+                        {inv.invitee.displayName}
+                      </span>
+                      {cancelButton(inv)}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ))}
+
           {searching && <p className="px-1 py-2 text-xs text-zinc-500">Recherche…</p>}
           {searchError && <p className="px-1 py-2 text-xs text-red-400">{searchError}</p>}
           {upToDate && users.length === 0 && (
@@ -118,28 +185,32 @@ export default function AddMemberModal({ conversationId, memberIds, onClose, onA
 
           <ul className="space-y-1">
             {users.map((user) => {
-              const alreadyMember = memberIds.includes(user.id);
+              const isMember = memberIds.includes(user.id);
+              const invitation = pending.find((i) => i.inviteeId === user.id);
               return (
                 <li
                   key={user.id}
                   className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-zinc-800"
                 >
-                  <span className="grid size-8 shrink-0 place-items-center rounded-full bg-indigo-500 text-sm font-semibold text-white">
-                    {user.displayName.charAt(0).toUpperCase()}
-                  </span>
+                  {avatar(user.displayName)}
                   <span className="min-w-0 flex-1 truncate text-sm text-zinc-100">
                     {user.displayName}
                   </span>
-                  {alreadyMember ? (
-                    <span className="text-xs text-zinc-500">Déjà membre</span>
+                  {isMember ? (
+                    <span className="text-xs text-zinc-500">Membre</span>
+                  ) : invitation ? (
+                    <span className="flex items-center gap-2">
+                      <span className="text-xs text-amber-400">Invité</span>
+                      {cancelButton(invitation)}
+                    </span>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => void handleAdd(user)}
-                      disabled={addingId !== null}
+                      onClick={() => void invite(user)}
+                      disabled={busyId !== null}
                       className="rounded-md bg-violet-600 px-3 py-1 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50"
                     >
-                      {addingId === user.id ? 'Ajout…' : 'Ajouter'}
+                      {busyId === user.id ? '…' : 'Inviter'}
                     </button>
                   )}
                 </li>
@@ -148,7 +219,7 @@ export default function AddMemberModal({ conversationId, memberIds, onClose, onA
           </ul>
         </div>
 
-        {addError && <p className="mt-2 text-xs text-red-400">{addError}</p>}
+        {actionError && <p className="mt-2 text-xs text-red-400">{actionError}</p>}
       </div>
     </div>
   );
