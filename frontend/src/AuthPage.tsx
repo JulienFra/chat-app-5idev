@@ -7,6 +7,10 @@ interface Props {
   initialMode?: 'login' | 'register';
 }
 
+// Même règle que le backend (RegisterDto) : 3 à 20 caractères, sans espace
+const PSEUDO_PATTERN = '[A-Za-z0-9_.\\-]{3,20}';
+const PSEUDO_HINT = '3 à 20 caractères, sans espace : lettres, chiffres, _ - .';
+
 export default function AuthPage({ onLoggedIn, initialMode = 'login' }: Props) {
   const [isLogin, setIsLogin] = useState(initialMode === 'login');
   const [email, setEmail] = useState('');
@@ -30,7 +34,7 @@ export default function AuthPage({ onLoggedIn, initialMode = 'login' }: Props) {
       } else {
         await api('/auth/register', {
           method: 'POST',
-          body: { email, password, displayName },
+          body: { email, password, displayName: displayName.trim() },
         });
         setMessage({ text: 'Compte créé avec succès ! Connecte-toi maintenant.', error: false });
         setIsLogin(true);
@@ -60,15 +64,24 @@ export default function AuthPage({ onLoggedIn, initialMode = 'login' }: Props) {
         <form onSubmit={handleSubmit} className="auth-form">
           {!isLogin && (
             <div className="form-group">
-              <label className="form-label">Pseudo</label>
+              <label className="form-label" htmlFor="pseudo">
+                Pseudo
+              </label>
               <input
+                id="pseudo"
                 type="text"
                 required
+                minLength={3}
+                maxLength={20}
+                pattern={PSEUDO_PATTERN}
+                title={PSEUDO_HINT}
+                autoComplete="username"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="form-input"
-                placeholder="Ex: Joueur 1"
+                placeholder="Ex: KCorp_iScourP"
               />
+              <small style={{ opacity: 0.7, fontSize: '0.8rem' }}>{PSEUDO_HINT}</small>
             </div>
           )}
 

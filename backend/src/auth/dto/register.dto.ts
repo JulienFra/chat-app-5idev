@@ -1,4 +1,5 @@
-import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail({}, { message: 'Adresse email invalide' })
@@ -13,8 +14,12 @@ export class RegisterDto {
   })
   password: string;
 
+  // Pseudo façon Discord : identifie une seule personne, sert à l'inviter
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
-  @MinLength(2, { message: 'Le nom doit contenir au moins 2 caractères' })
-  @MaxLength(50, { message: 'Le nom ne peut pas dépasser 50 caractères' })
+  @Matches(/^[A-Za-z0-9_.-]{3,20}$/, {
+    message:
+      'Le pseudo doit faire 3 à 20 caractères, sans espace : lettres sans accent, chiffres, _ - . uniquement',
+  })
   displayName: string;
 }
