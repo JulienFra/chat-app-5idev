@@ -21,4 +21,24 @@ export class UsersService {
       data: { email, passwordHash, displayName },
     });
   }
+
+  // Recherche par morceau de pseudo, pour inviter quelqu'un.
+  async search(query: string, currentUserId: string) {
+    const term = query.trim();
+    if (term.length < 2) return [];
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { not: currentUserId },
+        displayName: { contains: term, mode: 'insensitive' },
+      },
+      select: { id: true, displayName: true },
+      orderBy: { displayName: 'asc' },
+      take: 10,
+    });
+
+    const lower = term.toLowerCase();
+    const startsWith = (name: string) => (name.toLowerCase().startsWith(lower) ? 0 : 1);
+    return users.sort((a, b) => startsWith(a.displayName) - startsWith(b.displayName));
+  }
 }
