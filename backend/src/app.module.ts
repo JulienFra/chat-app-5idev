@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { MessagesModule } from './messages/messages.module';
 import { InvitationsModule } from './invitations/invitations.module';
+import { TeamsModule } from './teams/teams.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { InvitationsModule } from './invitations/invitations.module';
     AuthModule,
     ConversationsModule,
     MessagesModule,
+    TeamsModule,
     InvitationsModule,
   ],
   controllers: [AppController],

@@ -96,10 +96,10 @@ export function getCurrentUserId(): string | null {
   }
 }
 
-// Nom à afficher : celui de l'équipe, ou celui de l'autre personne pour un 1:1
+// Nom à afficher : « #salon » pour un salon d'équipe, l'autre personne pour un 1:1
 export function conversationTitle(conversation: Conversation, meId: string | null): string {
-  if (conversation.isGroup) {
-    return conversation.name?.trim() || 'Équipe sans nom';
+  if (conversation.type !== 'DIRECT') {
+    return `#${conversation.name?.trim() || 'salon'}`;
   }
   const other = conversation.memberships.find((m) => m.userId !== meId);
   return other?.user.displayName ?? 'Conversation';

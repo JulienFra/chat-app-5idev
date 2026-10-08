@@ -7,9 +7,10 @@ interface Props {
   profile: Profile;
   onClose: () => void;
   onChange: (profile: Profile) => void;
+  onLogoutRequest: () => void; // ouvre la confirmation de déconnexion
 }
 
-export default function ProfileModal({ profile, onClose, onChange }: Props) {
+export default function ProfileModal({ profile, onClose, onChange, onLogoutRequest }: Props) {
   // Interrupteur Premium
   const [savingPlan, setSavingPlan] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -134,7 +135,7 @@ export default function ProfileModal({ profile, onClose, onChange }: Props) {
         </section>
 
         {/* Mot de passe */}
-        <section className="p-6">
+        <section className="border-b border-zinc-800 p-6">
           <h3 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">
             Changer le mot de passe
           </h3>
@@ -201,6 +202,17 @@ export default function ProfileModal({ profile, onClose, onChange }: Props) {
               </button>
             </div>
           </form>
+        </section>
+
+        {/* Déconnexion */}
+        <section className="p-6">
+          <button
+            type="button"
+            onClick={onLogoutRequest}
+            className="w-full rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 transition hover:bg-red-500/20"
+          >
+            ⏻ Se déconnecter
+          </button>
         </section>
       </div>
     </div>

@@ -21,23 +21,20 @@ type AuthRequest = { user: { sub: string } };
 export class InvitationsController {
   constructor(private readonly invitationsService: InvitationsService) {}
 
-  // POST /api/conversations/:conversationId/invitations : inviter un joueur
-  @Post('conversations/:conversationId/invitations')
+  // POST /api/teams/:teamId/invitations : inviter un joueur
+  @Post('teams/:teamId/invitations')
   create(
-    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Param('teamId', ParseUUIDPipe) teamId: string,
     @Body() dto: CreateInvitationDto,
     @Req() req: AuthRequest,
   ) {
-    return this.invitationsService.create(req.user.sub, conversationId, dto.inviteeId);
+    return this.invitationsService.create(req.user.sub, teamId, dto.inviteeId);
   }
 
-  // GET /api/conversations/:conversationId/invitations : en attente (ADMIN)
-  @Get('conversations/:conversationId/invitations')
-  listForConversation(
-    @Param('conversationId', ParseUUIDPipe) conversationId: string,
-    @Req() req: AuthRequest,
-  ) {
-    return this.invitationsService.listForConversation(req.user.sub, conversationId);
+  // GET /api/teams/:teamId/invitations : en attente (CEO et coachs)
+  @Get('teams/:teamId/invitations')
+  listForTeam(@Param('teamId', ParseUUIDPipe) teamId: string, @Req() req: AuthRequest) {
+    return this.invitationsService.listForTeam(req.user.sub, teamId);
   }
 
   // GET /api/invitations : mes invitations reçues
@@ -60,7 +57,7 @@ export class InvitationsController {
     return this.invitationsService.decline(req.user.sub, id);
   }
 
-  // DELETE /api/invitations/:id : annuler (ADMIN du groupe)
+  // DELETE /api/invitations/:id : annuler (CEO et coachs)
   @Delete('invitations/:id')
   @HttpCode(204)
   cancel(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthRequest) {

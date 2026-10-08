@@ -1,1 +1,11 @@
 @import "tailwindcss";
+
+/* Pas de barres de défilement visibles : on peut toujours faire défiler
+   (molette, trackpad, doigt), mais la barre n'est pas dessinée */
+* {
+  scrollbar-width: none; /* Firefox */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Chrome, Edge, Safari */
+}
