@@ -1,7 +1,18 @@
+export type Plan = 'FREE' | 'PREMIUM';
+
 export interface User {
   id: string;
   displayName: string;
   email: string;
+}
+
+// Mon profil : GET /api/users/me
+export interface Profile {
+  id: string;
+  email: string;
+  displayName: string;
+  plan: Plan;
+  createdAt: string;
 }
 
 // Ce que renvoie la recherche GET /api/users?search= (jamais l'email)
