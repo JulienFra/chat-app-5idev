@@ -10,7 +10,8 @@ model User {
   id           String       @id @default(uuid())
   email        String       @unique
   passwordHash String
-  displayName  String       @unique
+  displayName  String       @unique // pseudo façon Discord : un seul utilisateur par pseudo
+  plan         Plan         @default(FREE) // abonnement porté par le compte du propriétaire
   createdAt    DateTime     @default(now())
 
   memberships  Membership[]
@@ -57,4 +58,9 @@ model Message {
 enum Role {
   MEMBER
   ADMIN
+}
+
+enum Plan {
+  FREE
+  PREMIUM
 }

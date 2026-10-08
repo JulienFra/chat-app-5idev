@@ -10,6 +10,7 @@ import { connectSocket, disconnectSocket } from './socket';
 import type { Conversation, Message } from './types';
 import ConversationView from './components/ConversationView';
 import ToastStack, { type NotificationToast } from './components/ToastStack';
+import UserPanel from './components/UserPanel';
 
 interface Props {
   onLogout: () => void;
@@ -79,7 +80,7 @@ export default function ChatPage({ onLogout }: Props) {
     }
   }, []);
 
-  // NOUVEAU : rechargement silencieux, sans vider la barre latérale.
+  // Rechargement silencieux, sans vider la barre latérale.
   // Utilisé quand une conversation apparaît en cours de route.
   const refresh = useCallback(async () => {
     try {
@@ -151,7 +152,7 @@ export default function ChatPage({ onLogout }: Props) {
       // 1. Mettre à jour l'aperçu et remonter la conversation
       const known = conversationsRef.current.some((c) => c.id === message.conversationId);
       if (!known) {
-        void refresh(); // NOUVEAU : silencieux au lieu de load()
+        void refresh();
       } else {
         setConversations((prev) => {
           const conv = prev.find((c) => c.id === message.conversationId);
@@ -208,7 +209,7 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, [handleNewMessage]);
 
-  // NOUVEAU : une conversation vient d'être créée ou on vient d'y être ajouté
+  // Une conversation vient d'être créée ou on vient d'y être ajouté
   useEffect(() => {
     const socket = connectSocket();
     const onNewConversation = () => {
@@ -235,7 +236,7 @@ export default function ChatPage({ onLogout }: Props) {
         method: 'POST',
         body: { name: newGroupName.trim() },
       });
-      // NOUVEAU : sans doublon, au cas où conversation:new serait arrivé avant
+      // Sans doublon, au cas où conversation:new serait arrivé avant
       setConversations((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);
       setSelectedId(created.id);
       setIsModalOpen(false);
@@ -361,6 +362,9 @@ export default function ChatPage({ onLogout }: Props) {
             </>
           )}
         </div>
+
+        {/* Mon profil, en bas comme sur Discord */}
+        <UserPanel />
       </aside>
 
       {/* Conversation sélectionnée */}
