@@ -1,14 +1,12 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { ConversationType, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { CreateConversationDto } from './dto/create-conversation.dto';
 
 @Injectable()
 export class ConversationsService {
@@ -26,47 +24,8 @@ export class ConversationsService {
     },
   };
 
-  // 1. Créer un groupe
-  async createGroup(userId: string, dto: CreateConversationDto) {
-    const memberIds = dto.memberIds
-      ? Array.from(new Set(dto.memberIds.filter((id) => id !== userId)))
-      : [];
-
-    // NOUVEAU : un même propriétaire ne peut pas avoir deux équipes du même nom
-    // (comparaison sans tenir compte des majuscules ni des espaces autour)
-    const name = dto.name.trim();
-    const duplicate = await this.prisma.conversation.findFirst({
-      where: {
-        isGroup: true,
-        name: { equals: name, mode: 'insensitive' },
-        memberships: { some: { userId, role: Role.ADMIN } },
-      },
-    });
-    if (duplicate) {
-      throw new ConflictException(`Tu as déjà une équipe nommée « ${name} »`);
-    }
-
-    const conversation = await this.prisma.conversation.create({
-      data: {
-        name, // NOUVEAU : le nom nettoyé
-        isGroup: true,
-        memberships: {
-          create: [
-            { userId, role: Role.ADMIN },
-            ...memberIds.map((id) => ({ userId: id, role: Role.MEMBER })),
-          ],
-        },
-      },
-      include: this.conversationInclude,
-    });
-
-    // Le créateur ET les invités rejoignent la room tout de suite
-    this.realtime.addMembersToConversation([userId, ...memberIds], conversation.id);
-
-    return conversation;
-  }
-
-  // 2. Lister les conversations de l'utilisateur, avec leur nombre de non-lus
+  // 1. Lister les conversations de l'utilisateur (messages privés + salons d'équipe
+  //    auxquels il a accès), avec leur nombre de non-lus
   async getUserConversations(userId: string) {
     const conversations = await this.prisma.conversation.findMany({
       where: { memberships: { some: { userId } } },
@@ -101,7 +60,7 @@ export class ConversationsService {
     }));
   }
 
-  // 3. Trouver ou créer une conversation 1:1
+  // 2. Trouver ou créer une conversation 1:1
   async findOrCreateDirect(userId: string, otherUserId: string) {
     if (userId === otherUserId) {
       throw new BadRequestException(
@@ -118,7 +77,7 @@ export class ConversationsService {
 
     const existing = await this.prisma.conversation.findFirst({
       where: {
-        isGroup: false,
+        type: ConversationType.DIRECT,
         AND: [
           { memberships: { some: { userId } } },
           { memberships: { some: { userId: otherUserId } } },
@@ -133,6 +92,7 @@ export class ConversationsService {
 
     const conversation = await this.prisma.conversation.create({
       data: {
+        type: ConversationType.DIRECT,
         isGroup: false,
         memberships: {
           create: [
@@ -150,7 +110,8 @@ export class ConversationsService {
     return conversation;
   }
 
-  // 4. Vérifier qu'un utilisateur est membre d'une conversation
+  // 3. Vérifier qu'un utilisateur a accès à une conversation
+  //    (pour un salon d'équipe, c'est syncChannels qui gère ces accès)
   async assertIsMember(userId: string, conversationId: string) {
     const membership = await this.prisma.membership.findUnique({
       where: { userId_conversationId: { userId, conversationId } },
@@ -163,64 +124,7 @@ export class ConversationsService {
     return membership;
   }
 
-  // 5. Vérifier que l'utilisateur est ADMIN du salon (Permissions S4)
-  async assertIsAdmin(userId: string, conversationId: string) {
-    const membership = await this.assertIsMember(userId, conversationId);
-
-    if (membership.role !== Role.ADMIN) {
-      throw new ForbiddenException('Action réservée aux administrateurs du salon');
-    }
-
-    return membership;
-  }
-
-  // 6. Ajouter un membre (par UUID ou par email) - réservé à l'ADMIN
-  async addMember(adminUserId: string, conversationId: string, identifier: string) {
-    await this.assertIsAdmin(adminUserId, conversationId);
-
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-    });
-    if (!conv) throw new NotFoundException('Salon introuvable');
-    if (!conv.isGroup) {
-      throw new BadRequestException('Impossible d’ajouter un membre à une discussion privée');
-    }
-
-    // Recherche par email ou par ID
-    const targetUser = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: identifier },
-          { id: identifier },
-        ],
-      },
-    });
-    if (!targetUser) {
-      throw new NotFoundException(`Aucun utilisateur trouvé pour "${identifier}"`);
-    }
-
-    const membership = await this.prisma.membership.upsert({
-      where: {
-        userId_conversationId: { userId: targetUser.id, conversationId },
-      },
-      update: {},
-      create: {
-        userId: targetUser.id,
-        conversationId,
-        role: Role.MEMBER,
-      },
-      include: {
-        user: { select: { id: true, displayName: true, email: true } },
-      },
-    });
-
-    // Le nouveau membre rejoint la room et voit le groupe apparaître
-    this.realtime.addMembersToConversation([targetUser.id], conversationId);
-
-    return membership;
-  }
-
-  // 7. Marquer une conversation comme lue (remet son compteur de non-lus à zéro)
+  // 4. Marquer une conversation comme lue (remet son compteur de non-lus à zéro)
   async markAsRead(userId: string, conversationId: string) {
     await this.assertIsMember(userId, conversationId);
 

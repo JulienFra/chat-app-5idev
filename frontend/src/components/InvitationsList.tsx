@@ -23,7 +23,7 @@ export default function InvitationsList({ invitations, respondingId, error, onRe
       ) : (
         <ul className="space-y-2">
           {invitations.map((inv) => {
-            const team = inv.conversation.name?.trim() || 'Équipe sans nom';
+            const team = inv.team.name;
             const busy = respondingId === inv.id;
             return (
               <li key={inv.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">

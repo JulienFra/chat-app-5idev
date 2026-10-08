@@ -1,4 +1,6 @@
 export type Plan = 'FREE' | 'PREMIUM';
+export type TeamRole = 'CEO' | 'COACH' | 'PLAYER';
+export type ConversationType = 'DIRECT' | 'GENERAL' | 'ADMIN' | 'EVENT';
 
 export interface User {
   id: string;
@@ -40,22 +42,45 @@ export interface Message {
 
 export interface Conversation {
   id: string;
+  type: ConversationType;
   isGroup: boolean;
   name: string | null;
+  teamId: string | null; // null pour les messages privés
   createdAt: string;
   memberships: Membership[];
   messages?: Message[];
   unreadCount?: number;
 }
 
+export interface TeamMember {
+  id: string;
+  role: TeamRole;
+  joinedAt: string;
+  teamId: string;
+  userId: string;
+  user: UserSummary;
+}
+
+// GET /api/teams
+export interface Team {
+  id: string;
+  name: string;
+  createdAt: string;
+  ownerId: string;
+  owner: { id: string; displayName: string; plan: Plan };
+  members: TeamMember[];
+  myRole: TeamRole | null;
+  limits: { maxTeams: number; maxSlots: number };
+}
+
 export interface Invitation {
   id: string;
   status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED';
   createdAt: string;
-  conversationId: string;
+  teamId: string;
   inviterId: string;
   inviteeId: string;
-  conversation: { id: string; name: string | null };
+  team: { id: string; name: string };
   inviter: UserSummary;
   invitee: UserSummary;
 }

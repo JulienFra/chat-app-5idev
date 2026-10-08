@@ -3,7 +3,7 @@ import { api, errorMessage } from '../api';
 import type { Invitation, UserSummary } from '../types';
 
 interface Props {
-  conversationId: string;
+  teamId: string;
   memberIds: string[]; // pour afficher « Membre »
   onClose: () => void;
 }
@@ -11,7 +11,7 @@ interface Props {
 const MIN_CHARS = 2;
 const DEBOUNCE_MS = 250;
 
-export default function AddMemberModal({ conversationId, memberIds, onClose }: Props) {
+export default function AddMemberModal({ teamId, memberIds, onClose }: Props) {
   const [query, setQuery] = useState('');
   // On garde la recherche qui a produit les résultats, pour ne jamais
   // afficher les résultats d'une ancienne frappe
@@ -20,7 +20,7 @@ export default function AddMemberModal({ conversationId, memberIds, onClose }: P
     users: [],
   });
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [pending, setPending] = useState<Invitation[]>([]); // invitations en attente du groupe
+  const [pending, setPending] = useState<Invitation[]>([]); // invitations en attente de l'équipe
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -30,7 +30,7 @@ export default function AddMemberModal({ conversationId, memberIds, onClose }: P
   // Invitations déjà envoyées et en attente
   useEffect(() => {
     let cancelled = false;
-    api<Invitation[]>(`/conversations/${conversationId}/invitations`)
+    api<Invitation[]>(`/teams/${teamId}/invitations`)
       .then((list) => {
         if (!cancelled) setPending(list);
       })
@@ -40,7 +40,7 @@ export default function AddMemberModal({ conversationId, memberIds, onClose }: P
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [teamId]);
 
   // Recherche avec un petit délai : on attend que l'utilisateur arrête de taper
   useEffect(() => {
@@ -69,7 +69,7 @@ export default function AddMemberModal({ conversationId, memberIds, onClose }: P
     setBusyId(user.id);
     setActionError(null);
     try {
-      const invitation = await api<Invitation>(`/conversations/${conversationId}/invitations`, {
+      const invitation = await api<Invitation>(`/teams/${teamId}/invitations`, {
         method: 'POST',
         body: { inviteeId: user.id },
       });

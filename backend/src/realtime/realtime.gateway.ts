@@ -57,13 +57,27 @@ export class RealtimeGateway implements OnGatewayConnection {
     this.server.to(conversationRoom(message.conversationId)).emit('message:new', message);
   }
 
-  // Appelé quand une conversation est créée ou qu'on y ajoute des membres :
-  // leurs sockets déjà connectés rejoignent la room, et leur liste se met à jour.
+  // Des utilisateurs ont maintenant accès à une conversation :
+  // leurs sockets rejoignent la room, et leur liste se met à jour.
   addMembersToConversation(userIds: string[], conversationId: string) {
     if (userIds.length === 0) return;
     const rooms = userIds.map(userRoom);
     this.server.in(rooms).socketsJoin(conversationRoom(conversationId));
     this.server.to(rooms).emit('conversation:new', { conversationId });
+  }
+
+  // Des utilisateurs perdent l'accès à une conversation (exclusion, rôle retiré…) :
+  // ils ne reçoivent plus ses messages.
+  removeMembersFromConversation(userIds: string[], conversationId: string) {
+    if (userIds.length === 0) return;
+    this.server.in(userIds.map(userRoom)).socketsLeave(conversationRoom(conversationId));
+  }
+
+  // Les équipes de ces utilisateurs ont changé (nom, membres, rôles, suppression…) :
+  // leur interface recharge équipes et conversations.
+  notifyTeamsChanged(userIds: string[]) {
+    if (userIds.length === 0) return;
+    this.server.to(userIds.map(userRoom)).emit('teams:changed');
   }
 
   // Envoie un événement à un seul utilisateur, sur tous ses onglets

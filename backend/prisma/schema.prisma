@@ -16,19 +16,56 @@ model User {
 
   memberships         Membership[]
   messages            Message[]
+  ownedTeams          Team[]       // équipes dont il est le propriétaire (= CEO)
+  teamMemberships     TeamMember[] // équipes dont il fait partie, avec son rôle
+  createdEvents       Event[]
   sentInvitations     Invitation[] @relation("SentInvitations")
   receivedInvitations Invitation[] @relation("ReceivedInvitations")
 }
 
-model Conversation {
-  id          String       @id @default(uuid())
-  isGroup     Boolean      @default(false)
-  name        String?      // utile uniquement si isGroup = true
-  createdAt   DateTime     @default(now())
+// Une structure e-sport (ex : « KCorp Valorant »)
+model Team {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
 
-  memberships Membership[]
+  // Le propriétaire est l'unique CEO. Son plan (Free/Premium) fixe les limites.
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId String
+
+  members       TeamMember[]
+  conversations Conversation[] // #général, #admin, salons d'events
+  events        Event[]
+  invitations   Invitation[]
+}
+
+model TeamMember {
+  id       String   @id @default(uuid())
+  role     TeamRole @default(PLAYER)
+  joinedAt DateTime @default(now())
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([teamId, userId]) // on n'est qu'une fois dans une équipe
+}
+
+model Conversation {
+  id          String           @id @default(uuid())
+  type        ConversationType @default(DIRECT)
+  isGroup     Boolean          @default(false) // true pour les salons d'équipe (conservé pour le code existant)
+  name        String?          // nom du salon : général, admin, scrim-vitality-08-10…
+  createdAt   DateTime         @default(now())
+
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String? // null pour les messages privés
+
+  event       Event?           // rempli si c'est le salon dédié d'un event
+  memberships Membership[]     // qui voit ce salon (ex : #admin = CEO + coachs)
   messages    Message[]
-  invitations Invitation[]
 }
 
 model Membership {
@@ -58,7 +95,7 @@ model Message {
   conversationId String
 }
 
-// Invitation à rejoindre un groupe : il faut l'accepter pour devenir membre.
+// Invitation à rejoindre une équipe : il faut l'accepter pour devenir membre.
 // Une invitation PENDING de plus de 7 jours est considérée comme expirée.
 model Invitation {
   id          String           @id @default(uuid())
@@ -66,8 +103,8 @@ model Invitation {
   createdAt   DateTime         @default(now())
   respondedAt DateTime?        // date d'acceptation, de refus ou d'annulation
 
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  conversationId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
 
   inviter   User   @relation("SentInvitations", fields: [inviterId], references: [id], onDelete: Cascade)
   inviterId String
@@ -75,9 +112,30 @@ model Invitation {
   invitee   User   @relation("ReceivedInvitations", fields: [inviteeId], references: [id], onDelete: Cascade)
   inviteeId String
 
-  @@index([inviteeId, status])      // « Mes invitations »
-  @@index([conversationId, status]) // invitations en attente d'un groupe
-  @@index([inviterId, createdAt])   // limite de 20 envois par heure
+  @@index([inviteeId, status])    // « Mes invitations »
+  @@index([teamId, status])       // invitations en attente d'une équipe
+  @@index([inviterId, createdAt]) // limite de 20 envois par heure
+}
+
+// Un scrim ou un match officiel, affiché dans le calendrier de l'équipe
+model Event {
+  id        String    @id @default(uuid())
+  type      EventType
+  opponent  String    // ex : « Vitality », sert aussi au nom du salon
+  startsAt  DateTime
+  createdAt DateTime  @default(now())
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdById String
+
+  // Salon dédié : uniquement en Premium (null en Free)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  conversationId String?       @unique
+
+  @@index([teamId, startsAt]) // le calendrier filtre par équipe et par date
 }
 
 enum Role {
@@ -90,9 +148,27 @@ enum Plan {
   PREMIUM
 }
 
+enum TeamRole {
+  CEO
+  COACH
+  PLAYER
+}
+
+enum ConversationType {
+  DIRECT  // message privé entre deux joueurs
+  GENERAL // #général d'une équipe (tout le monde)
+  ADMIN   // #admin d'une équipe (CEO + coachs, Premium)
+  EVENT   // salon dédié à un scrim ou un match (Premium)
+}
+
 enum InvitationStatus {
   PENDING
   ACCEPTED
   DECLINED
   CANCELLED
+}
+
+enum EventType {
+  SCRIM
+  MATCH
 }
