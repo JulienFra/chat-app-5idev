@@ -14,8 +14,10 @@ model User {
   plan         Plan         @default(FREE) // abonnement porté par le compte du propriétaire
   createdAt    DateTime     @default(now())
 
-  memberships  Membership[]
-  messages     Message[]
+  memberships         Membership[]
+  messages            Message[]
+  sentInvitations     Invitation[] @relation("SentInvitations")
+  receivedInvitations Invitation[] @relation("ReceivedInvitations")
 }
 
 model Conversation {
@@ -26,6 +28,7 @@ model Conversation {
 
   memberships Membership[]
   messages    Message[]
+  invitations Invitation[]
 }
 
 model Membership {
@@ -55,6 +58,28 @@ model Message {
   conversationId String
 }
 
+// Invitation à rejoindre un groupe : il faut l'accepter pour devenir membre.
+// Une invitation PENDING de plus de 7 jours est considérée comme expirée.
+model Invitation {
+  id          String           @id @default(uuid())
+  status      InvitationStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  respondedAt DateTime?        // date d'acceptation, de refus ou d'annulation
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+
+  inviter   User   @relation("SentInvitations", fields: [inviterId], references: [id], onDelete: Cascade)
+  inviterId String
+
+  invitee   User   @relation("ReceivedInvitations", fields: [inviteeId], references: [id], onDelete: Cascade)
+  inviteeId String
+
+  @@index([inviteeId, status])      // « Mes invitations »
+  @@index([conversationId, status]) // invitations en attente d'un groupe
+  @@index([inviterId, createdAt])   // limite de 20 envois par heure
+}
+
 enum Role {
   MEMBER
   ADMIN
@@ -63,4 +88,11 @@ enum Role {
 enum Plan {
   FREE
   PREMIUM
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
 }

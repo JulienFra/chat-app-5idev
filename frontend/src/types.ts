@@ -47,3 +47,15 @@ export interface Conversation {
   messages?: Message[];
   unreadCount?: number;
 }
+
+export interface Invitation {
+  id: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED';
+  createdAt: string;
+  conversationId: string;
+  inviterId: string;
+  inviteeId: string;
+  conversation: { id: string; name: string | null };
+  inviter: UserSummary;
+  invitee: UserSummary;
+}

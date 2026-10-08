@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, conversationTitle, errorMessage } from '../api';
 import { connectSocket } from '../socket';
-import type { Conversation, Message, Membership } from '../types';
+import type { Conversation, Message } from '../types';
 import AddMemberModal from './AddMemberModal';
 
 interface Props {
@@ -22,14 +22,17 @@ function addMessage(list: Message[], message: Message): Message[] {
 
 export default function ConversationView({ conversation, meId, onBack, onMessageSent }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [memberships, setMemberships] = useState<Membership[]>(conversation.memberships ?? []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Les membres viennent directement de la conversation : quand la liste est
+  // rechargée (ex : quelqu'un a accepté une invitation), ils se mettent à jour
+  const memberships = conversation.memberships ?? [];
 
   // Vérifier si l'utilisateur connecté est ADMIN de ce salon
   const myMembership = memberships.find((m) => m.userId === meId);
@@ -92,14 +95,6 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
     }
   };
 
-  // Un membre vient d'être ajouté depuis la fenêtre de recherche
-  const handleMemberAdded = (newMembership: Membership) => {
-    setMemberships((prev) => [
-      ...prev.filter((m) => m.userId !== newMembership.userId),
-      newMembership,
-    ]);
-  };
-
   return (
     <>
       <header className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-3">
@@ -126,10 +121,10 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
         {isAdmin && (
           <button
             type="button"
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={() => setIsInviteOpen(true)}
             className="rounded-lg border border-violet-500/30 bg-violet-600/10 px-3 py-1.5 text-xs font-semibold text-violet-300 hover:bg-violet-600/20"
           >
-            + Ajouter membre
+            + Inviter
           </button>
         )}
       </header>
@@ -206,12 +201,11 @@ export default function ConversationView({ conversation, meId, onBack, onMessage
         </div>
       </form>
 
-      {isAddModalOpen && (
+      {isInviteOpen && (
         <AddMemberModal
           conversationId={conversation.id}
           memberIds={memberships.map((m) => m.userId)}
-          onClose={() => setIsAddModalOpen(false)}
-          onAdded={handleMemberAdded}
+          onClose={() => setIsInviteOpen(false)}
         />
       )}
     </>
