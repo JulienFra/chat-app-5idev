@@ -127,7 +127,9 @@ jobs:
             npx prisma generate
             npx prisma migrate deploy
             npm run build
-            pm2 restart chatapp-backend
+            # Redémarre le backend, ou le crée si PM2 ne le connaît plus (ex : après un reboot)
+            pm2 restart chatapp-backend || pm2 start dist/main.js --name chatapp-backend
+            pm2 save
 
             # Frontend
             cd ../frontend

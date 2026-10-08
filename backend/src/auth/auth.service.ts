@@ -7,8 +7,9 @@ import { LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
-  constructor(private usersService: UsersService,
-    private jwtService: JwtService // On injecte le service JWT
+  constructor(
+    private usersService: UsersService,
+    private jwtService: JwtService, // On injecte le service JWT
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -18,6 +19,12 @@ export class AuthService {
     const existingUser = await this.usersService.findByEmail(email);
     if (existingUser) {
       throw new ConflictException('Cet email est déjà utilisé.');
+    }
+
+    // 1 bis. Le pseudo doit être libre (sans tenir compte des majuscules)
+    const existingName = await this.usersService.findByDisplayName(displayName);
+    if (existingName) {
+      throw new ConflictException('Ce pseudo est déjà pris.');
     }
 
     // 2. Transformer le mot de passe en clair en un hash indéchiffrable
@@ -30,6 +37,7 @@ export class AuthService {
     const { passwordHash: _, ...result } = newUser;
     return result;
   }
+
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
@@ -50,5 +58,5 @@ export class AuthService {
     return {
       access_token: await this.jwtService.signAsync(payload),
     };
-    }
+  }
 }
