@@ -1,7 +1,10 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
+  ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
+  SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
@@ -50,6 +53,23 @@ export class RealtimeGateway implements OnGatewayConnection {
       // Token absent, invalide ou expiré : on coupe la connexion
       client.disconnect(true);
     }
+  }
+
+  @SubscribeMessage('typing')
+  handleTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { conversationId: string; isTyping: boolean },
+  ) {
+    const userId = client.data.userId;
+    if (!userId) return;
+
+    client.broadcast
+      .to(conversationRoom(data.conversationId))
+      .emit('typing', {
+        conversationId: data.conversationId,
+        userId,
+        isTyping: data.isTyping,
+      });
   }
 
   // Appelé par MessagesService APRÈS l'enregistrement en base

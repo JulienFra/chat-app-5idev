@@ -126,7 +126,7 @@ export default function LandingPage({ onGetStarted, onLogin }: Props) {
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-yellow-600 text-xs font-bold text-white">F</span>
                 <div>
                   <div className="flex items-baseline gap-2">
-                    <span className="font-semibold text-white">Florentin</span>
+                    <span className="font-semibold text-white">Julien</span>
                     <span className="rounded bg-yellow-500/20 px-1.5 py-0.5 text-[10px] font-bold text-yellow-500">CEO</span>
                     <span className="text-[11px] text-zinc-500">19:41</span>
                   </div>
@@ -137,7 +137,7 @@ export default function LandingPage({ onGetStarted, onLogin }: Props) {
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-violet-600 text-xs font-bold text-white">A</span>
                 <div>
                   <div className="flex items-baseline gap-2">
-                    <span className="font-semibold text-white">Alice</span>
+                    <span className="font-semibold text-white">Florentin</span>
                     <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-bold text-violet-400">COACH</span>
                     <span className="text-[11px] text-zinc-500">19:42</span>
                   </div>
