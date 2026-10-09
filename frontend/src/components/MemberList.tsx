@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, errorMessage } from '../api';
+import { connectSocket } from '../socket';
 import type { Team, TeamMember, TeamRole } from '../types';
 
 interface Props {
   team: Team;
   meId: string | null;
-  onChanged: () => void; // recharge équipes et conversations
-  onMessage: (userId: string) => void; // ouvre un message privé
+  onChanged: () => void;
+  onMessage: (userId: string) => void;
 }
 
 const ROLE_LABEL: Record<TeamRole, string> = { CEO: 'CEO', COACH: 'Coach', PLAYER: 'Joueur' };
@@ -17,24 +18,56 @@ const ROLE_STYLE: Record<TeamRole, string> = {
   PLAYER: 'bg-zinc-700/60 text-zinc-400',
 };
 
-// Colonne de droite : les membres de l'équipe, cliquables pour les gérer
 export default function MemberList({ team, meId, onChanged, onMessage }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const socket = connectSocket();
+
+    const onOnlineList = (userIds: string[]) => {
+      setOnlineUsers(new Set(userIds));
+    };
+
+    const onUserOnline = ({ userId }: { userId: string }) => {
+      setOnlineUsers((prev) => {
+        const next = new Set(prev);
+        next.add(userId);
+        return next;
+      });
+    };
+
+    const onUserOffline = ({ userId }: { userId: string }) => {
+      setOnlineUsers((prev) => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+    };
+
+    socket.on('users:online_list', onOnlineList);
+    socket.on('user:online', onUserOnline);
+    socket.on('user:offline', onUserOffline);
+
+    socket.emit('users:request_online');
+
+    return () => {
+      socket.off('users:online_list', onOnlineList);
+      socket.off('user:online', onUserOnline);
+      socket.off('user:offline', onUserOffline);
+    };
+  }, []);
 
   const isPremium = team.owner.plan === 'PREMIUM';
   const isCeo = team.myRole === 'CEO';
-  // Mêmes règles que le serveur : le CEO, et les coachs en Premium
   const canManageRoster = isCeo || (team.myRole === 'COACH' && isPremium);
-
   const canChangeRole = (m: TeamMember) => isPremium && isCeo && m.role !== 'CEO';
   const canKick = (m: TeamMember) =>
-    m.role !== 'CEO' &&
-    m.userId !== meId &&
-    (isCeo || (canManageRoster && m.role === 'PLAYER'));
+    m.role !== 'CEO' && m.userId !== meId && (isCeo || (canManageRoster && m.role === 'PLAYER'));
 
-  // Lance une action, affiche l'erreur éventuelle, recharge en cas de succès
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
@@ -61,12 +94,12 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
     void run(() => api(`/teams/${team.id}/members/${m.userId}`, { method: 'DELETE' }));
   };
 
-  // En Premium : groupés par rôle. En Free : une seule liste, sans rôles visibles.
   const groups: (TeamRole | null)[] = isPremium ? ['CEO', 'COACH', 'PLAYER'] : [null];
 
   const renderMember = (m: TeamMember) => {
     const open = openId === m.userId;
     const isMe = m.userId === meId;
+    const isOnline = onlineUsers.has(m.userId);
     const actions = canChangeRole(m) || canKick(m) || !isMe;
 
     return (
@@ -81,10 +114,19 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
             open ? 'bg-zinc-700/60' : 'hover:bg-zinc-800/80'
           }`}
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-zinc-700 text-xs font-semibold text-white">
-            {m.user.displayName.charAt(0).toUpperCase()}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-sm text-zinc-300">
+          <div className="relative">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-zinc-700 text-xs font-semibold text-white">
+              {m.user.displayName.charAt(0).toUpperCase()}
+            </span>
+            <span
+              className={`absolute bottom-0 right-0 size-2.5 rounded-full border-[1.5px] border-zinc-900 ${
+                isOnline ? 'bg-green-500' : 'bg-zinc-500'
+              }`}
+              title={isOnline ? 'En ligne' : 'Hors ligne'}
+            />
+          </div>
+
+          <span className={`min-w-0 flex-1 truncate text-sm transition-colors ${isOnline ? 'text-zinc-200' : 'text-zinc-400'}`}>
             {m.user.displayName}
             {isMe && <span className="text-zinc-600"> (toi)</span>}
           </span>
@@ -95,7 +137,6 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
           )}
         </button>
 
-        {/* Actions sur ce membre */}
         {open && (
           <div className="mx-1 mt-1 mb-2 space-y-2 rounded-lg border border-zinc-700/60 bg-zinc-950/60 p-3">
             <div className="flex items-center justify-between">

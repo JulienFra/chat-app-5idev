@@ -4,6 +4,7 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -11,16 +12,15 @@ import {
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 
-// Nom de la room d'une conversation
 export const conversationRoom = (conversationId: string) => `conv:${conversationId}`;
-
-// Nom de la room personnelle d'un utilisateur (tous ses onglets et appareils)
 export const userRoom = (userId: string) => `user:${userId}`;
 
 @WebSocketGateway()
-export class RealtimeGateway implements OnGatewayConnection {
+export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+
+  private activeSockets = new Map<string, Set<string>>();
 
   constructor(
     private readonly jwtService: JwtService,
@@ -28,31 +28,55 @@ export class RealtimeGateway implements OnGatewayConnection {
     private readonly prisma: PrismaService,
   ) {}
 
-  // Appelé à chaque nouvelle connexion WebSocket
   async handleConnection(client: Socket) {
     try {
-      // 1. Le token est envoyé une seule fois, à la connexion
       const token: unknown = client.handshake.auth?.token;
       if (typeof token !== 'string') throw new Error('Token manquant');
 
       const payload = await this.jwtService.verifyAsync<{ sub: string }>(token, {
         secret: this.configService.getOrThrow<string>('JWT_SECRET'),
       });
-      client.data.userId = payload.sub;
+      const userId = payload.sub;
+      client.data.userId = userId;
 
-      // 2. Room personnelle + une room par conversation dont l'utilisateur est membre
+      if (!this.activeSockets.has(userId)) {
+        this.activeSockets.set(userId, new Set());
+        this.server.emit('user:online', { userId });
+      }
+      this.activeSockets.get(userId)!.add(client.id);
+
+      client.emit('users:online_list', Array.from(this.activeSockets.keys()));
+
       const memberships = await this.prisma.membership.findMany({
-        where: { userId: payload.sub },
+        where: { userId },
         select: { conversationId: true },
       });
       await client.join([
-        userRoom(payload.sub),
+        userRoom(userId),
         ...memberships.map((m) => conversationRoom(m.conversationId)),
       ]);
     } catch {
-      // Token absent, invalide ou expiré : on coupe la connexion
       client.disconnect(true);
     }
+  }
+
+  handleDisconnect(client: Socket) {
+    const userId = client.data.userId;
+    if (!userId) return;
+
+    const userSockets = this.activeSockets.get(userId);
+    if (userSockets) {
+      userSockets.delete(client.id);
+      if (userSockets.size === 0) {
+        this.activeSockets.delete(userId);
+        this.server.emit('user:offline', { userId });
+      }
+    }
+  }
+
+  @SubscribeMessage('users:request_online')
+  handleRequestOnline(@ConnectedSocket() client: Socket) {
+    client.emit('users:online_list', Array.from(this.activeSockets.keys()));
   }
 
   @SubscribeMessage('typing')
@@ -72,13 +96,10 @@ export class RealtimeGateway implements OnGatewayConnection {
       });
   }
 
-  // Appelé par MessagesService APRÈS l'enregistrement en base
   emitNewMessage(message: { conversationId: string }) {
     this.server.to(conversationRoom(message.conversationId)).emit('message:new', message);
   }
 
-  // Des utilisateurs ont maintenant accès à une conversation :
-  // leurs sockets rejoignent la room, et leur liste se met à jour.
   addMembersToConversation(userIds: string[], conversationId: string) {
     if (userIds.length === 0) return;
     const rooms = userIds.map(userRoom);
@@ -86,22 +107,16 @@ export class RealtimeGateway implements OnGatewayConnection {
     this.server.to(rooms).emit('conversation:new', { conversationId });
   }
 
-  // Des utilisateurs perdent l'accès à une conversation (exclusion, rôle retiré…) :
-  // ils ne reçoivent plus ses messages.
   removeMembersFromConversation(userIds: string[], conversationId: string) {
     if (userIds.length === 0) return;
     this.server.in(userIds.map(userRoom)).socketsLeave(conversationRoom(conversationId));
   }
 
-  // Les équipes de ces utilisateurs ont changé (nom, membres, rôles, suppression…) :
-  // leur interface recharge équipes et conversations.
   notifyTeamsChanged(userIds: string[]) {
     if (userIds.length === 0) return;
     this.server.to(userIds.map(userRoom)).emit('teams:changed');
   }
 
-  // Envoie un événement à un seul utilisateur, sur tous ses onglets
-  // (ex : invitation reçue ou annulée)
   emitToUser(userId: string, event: string, payload: unknown) {
     this.server.to(userRoom(userId)).emit(event, payload);
   }
