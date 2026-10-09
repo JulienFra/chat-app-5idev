@@ -7,8 +7,8 @@ import type { Conversation, Message } from '../types';
 interface Props {
   conversation: Conversation;
   meId: string | null;
-  teamName?: string; // pour un salon d'équipe
-  onOpenSettings?: () => void; // ouvre les paramètres de l'équipe
+  teamName?: string;
+  onOpenSettings?: () => void;
   onBack: () => void;
   onMessageSent: (message: Message) => void;
 }
@@ -32,14 +32,18 @@ export default function ConversationView({
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  
+  const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
+  
   const bottomRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const memberships = conversation.memberships ?? [];
 
-  // Charger l'historique
   useEffect(() => {
     let cancelled = false;
     api<Message[]>(`/conversations/${conversation.id}/messages`)
@@ -57,22 +61,75 @@ export default function ConversationView({
     };
   }, [conversation.id]);
 
-  // Messages Socket.io en direct
   useEffect(() => {
     const socket = connectSocket();
+    
     const onNewMessage = (message: Message) => {
       if (message.conversationId !== conversation.id) return;
       setMessages((prev) => addMessage(prev, message));
+      
+      setTypingUsers((prev) => {
+        const next = { ...prev };
+        delete next[message.authorId];
+        return next;
+      });
     };
+
+    const onTyping = (data: { conversationId: string; userId: string; isTyping: boolean }) => {
+      if (data.conversationId !== conversation.id || data.userId === meId) return;
+      setTypingUsers((prev) => {
+        const next = { ...prev };
+        if (data.isTyping) {
+          next[data.userId] = Date.now();
+        } else {
+          delete next[data.userId];
+        }
+        return next;
+      });
+    };
+
     socket.on('message:new', onNewMessage);
+    socket.on('typing', onTyping);
+    
     return () => {
       socket.off('message:new', onNewMessage);
+      socket.off('typing', onTyping);
     };
-  }, [conversation.id]);
+  }, [conversation.id, meId]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setTypingUsers((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [id, time] of Object.entries(next)) {
+          if (now - time > 3000) {
+            delete next[id];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
+
+  const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDraft(e.target.value);
+
+    const socket = connectSocket();
+    socket.emit('typing', { conversationId: conversation.id, isTyping: true });
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit('typing', { conversationId: conversation.id, isTyping: false });
+    }, 2000);
+  };
 
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
@@ -81,6 +138,11 @@ export default function ConversationView({
 
     setSending(true);
     setSendError(null);
+    
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    const socket = connectSocket();
+    socket.emit('typing', { conversationId: conversation.id, isTyping: false });
+
     try {
       const message = await api<Message>(`/conversations/${conversation.id}/messages`, {
         method: 'POST',
@@ -95,6 +157,19 @@ export default function ConversationView({
       setSending(false);
     }
   };
+
+  const activeTypingIds = Object.keys(typingUsers);
+  let typingText = null;
+  if (activeTypingIds.length > 0) {
+    const names = activeTypingIds.map((id) => {
+      const m = memberships.find((member) => member.userId === id);
+      return m?.user?.displayName || 'Un joueur';
+    });
+
+    if (names.length === 1) typingText = `${names[0]} est en train d'écrire...`;
+    else if (names.length === 2) typingText = `${names[0]} et ${names[1]} écrivent...`;
+    else typingText = 'Plusieurs joueurs écrivent...';
+  }
 
   return (
     <>
@@ -130,7 +205,7 @@ export default function ConversationView({
         )}
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 relative flex flex-col">
         {loading && <p className="text-center text-sm text-zinc-500">Chargement…</p>}
 
         {error && (
@@ -140,7 +215,7 @@ export default function ConversationView({
         )}
 
         {!loading && !error && messages.length === 0 && (
-          <p className="text-center text-sm text-zinc-500">Aucun message. Écris le premier !</p>
+          <p className="text-center text-sm text-zinc-500">Aucun message. Lance la discussion !</p>
         )}
 
         {messages.map((m, i) => {
@@ -182,20 +257,29 @@ export default function ConversationView({
         <div ref={bottomRef} />
       </div>
 
+      {/* Affichage de l'indicateur de frappe */}
+      <div className="px-4 pb-1 pt-1 bg-zinc-900 min-h-[24px]">
+        {typingText ? (
+          <span className="text-xs italic text-violet-400 animate-pulse transition-opacity">
+            {typingText}
+          </span>
+        ) : null}
+      </div>
+
       <form onSubmit={handleSend} className="border-t border-zinc-800 bg-zinc-900 px-4 py-3">
         {sendError && <p className="mb-2 text-sm text-red-400">{sendError}</p>}
         <div className="flex gap-2">
           <input
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={handleTyping}
             maxLength={4000}
             placeholder={`Écris dans ${conversationTitle(conversation, meId)}…`}
-            className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none"
+            className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none transition-colors"
           />
           <button
             type="submit"
             disabled={sending || draft.trim().length === 0}
-            className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
           >
             Envoyer
           </button>
