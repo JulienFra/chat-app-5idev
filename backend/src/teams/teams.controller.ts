@@ -11,6 +11,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { EventType } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TeamsService } from './teams.service';
 import { TeamNameDto } from './dto/team-name.dto';
@@ -24,19 +25,16 @@ type AuthRequest = { user: { sub: string } };
 export class TeamsController {
   constructor(private readonly teamsService: TeamsService) {}
 
-  // GET /api/teams : mes équipes
   @Get()
   list(@Req() req: AuthRequest) {
     return this.teamsService.listMyTeams(req.user.sub);
   }
 
-  // POST /api/teams : créer une équipe
   @Post()
   create(@Body() dto: TeamNameDto, @Req() req: AuthRequest) {
     return this.teamsService.create(req.user.sub, dto.name);
   }
 
-  // PATCH /api/teams/:id : renommer (CEO)
   @Patch(':id')
   rename(
     @Param('id', ParseUUIDPipe) id: string,
@@ -46,14 +44,12 @@ export class TeamsController {
     return this.teamsService.rename(req.user.sub, id, dto.name);
   }
 
-  // DELETE /api/teams/:id : supprimer (CEO)
   @Delete(':id')
   @HttpCode(204)
   remove(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthRequest) {
     return this.teamsService.remove(req.user.sub, id);
   }
 
-  // PATCH /api/teams/:id/members/:userId : changer le rôle (CEO)
   @Patch(':id/members/:userId')
   @HttpCode(204)
   changeRole(
@@ -65,7 +61,6 @@ export class TeamsController {
     return this.teamsService.changeRole(req.user.sub, id, userId, dto.role);
   }
 
-  // DELETE /api/teams/:id/members/:userId : exclure (CEO, ou coach pour un joueur)
   @Delete(':id/members/:userId')
   @HttpCode(204)
   kick(
@@ -76,14 +71,12 @@ export class TeamsController {
     return this.teamsService.kick(req.user.sub, id, userId);
   }
 
-  // POST /api/teams/:id/leave : quitter l'équipe
   @Post(':id/leave')
   @HttpCode(204)
   leave(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthRequest) {
     return this.teamsService.leave(req.user.sub, id);
   }
 
-  // POST /api/teams/:id/transfer : transférer la propriété (CEO)
   @Post(':id/transfer')
   @HttpCode(204)
   transfer(
@@ -92,5 +85,21 @@ export class TeamsController {
     @Req() req: AuthRequest,
   ) {
     return this.teamsService.transfer(req.user.sub, id, dto.userId);
+  }
+
+  // 📅 AJOUT : Créer un événement (et son salon automatiquement)
+  @Post(':id/events')
+  createEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { type: EventType; opponent: string; startsAt: string },
+    @Req() req: AuthRequest,
+  ) {
+    return this.teamsService.createEvent(
+      req.user.sub,
+      id,
+      dto.type,
+      dto.opponent,
+      new Date(dto.startsAt),
+    );
   }
 }

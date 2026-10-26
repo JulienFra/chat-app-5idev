@@ -1,6 +1,7 @@
 export type Plan = 'FREE' | 'PREMIUM';
 export type TeamRole = 'CEO' | 'COACH' | 'PLAYER';
 export type ConversationType = 'DIRECT' | 'GENERAL' | 'ADMIN' | 'EVENT';
+export type EventType = 'SCRIM' | 'MATCH';
 
 export interface User {
   id: string;
@@ -8,7 +9,6 @@ export interface User {
   email: string;
 }
 
-// Mon profil : GET /api/users/me
 export interface Profile {
   id: string;
   email: string;
@@ -17,7 +17,6 @@ export interface Profile {
   createdAt: string;
 }
 
-// Ce que renvoie la recherche GET /api/users?search= (jamais l'email)
 export interface UserSummary {
   id: string;
   displayName: string;
@@ -45,7 +44,7 @@ export interface Conversation {
   type: ConversationType;
   isGroup: boolean;
   name: string | null;
-  teamId: string | null; // null pour les messages privés
+  teamId: string | null;
   createdAt: string;
   memberships: Membership[];
   messages?: Message[];
@@ -61,7 +60,16 @@ export interface TeamMember {
   user: UserSummary;
 }
 
-// GET /api/teams
+export interface Event {
+  id: string;
+  type: EventType;
+  opponent: string;
+  startsAt: string;
+  teamId: string;
+  createdById: string;
+  conversationId: string | null;
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -69,6 +77,7 @@ export interface Team {
   ownerId: string;
   owner: { id: string; displayName: string; plan: Plan };
   members: TeamMember[];
+  events: Event[];
   myRole: TeamRole | null;
   limits: { maxTeams: number; maxSlots: number };
 }

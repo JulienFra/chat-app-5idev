@@ -8,10 +8,11 @@ import {
   markConversationRead,
 } from './api';
 import { connectSocket, disconnectSocket } from './socket';
-import type { Conversation, ConversationType, Invitation, Message, Team } from './types';
+import type { Conversation, ConversationType, Invitation, Message, Team, Event } from './types';
 import AddMemberModal from './components/AddMemberModal';
 import ConversationView from './components/ConversationView';
 import CreateTeamModal from './components/CreateTeamModal';
+import CreateEventModal from './components/CreateEventModal';
 import InvitationsList from './components/InvitationsList';
 import MemberList from './components/MemberList';
 import TeamSettingsModal from './components/TeamSettingsModal';
@@ -23,12 +24,9 @@ interface Props {
 }
 
 const MAX_TOASTS = 3;
-
-// Les toasts d'invitation ont une clé « invite:<id> » pour ne pas être
-// confondus avec ceux des conversations
 const INVITE_PREFIX = 'invite:';
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours en millisecondes
 
-// Ordre des salons dans une équipe
 const CHANNEL_ORDER: Record<ConversationType, number> = {
   GENERAL: 0,
   ADMIN: 1,
@@ -36,7 +34,6 @@ const CHANNEL_ORDER: Record<ConversationType, number> = {
   DIRECT: 3,
 };
 
-// Couleurs des icônes d'équipe (choisies selon l'id, donc stables)
 const TEAM_COLORS = [
   'from-violet-500 to-indigo-600',
   'from-rose-500 to-orange-500',
@@ -52,14 +49,12 @@ function teamColor(id: string): string {
   return TEAM_COLORS[hash % TEAM_COLORS.length];
 }
 
-// « KCorp Valorant » → « KV », « Scrims » → « SC »
 function initials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
   return name.trim().slice(0, 2).toUpperCase();
 }
 
-// Transforme les compteurs renvoyés par le serveur en { [convId]: nombre }
 function unreadFrom(list: Conversation[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const c of list) {
@@ -68,7 +63,6 @@ function unreadFrom(list: Conversation[]): Record<string, number> {
   return counts;
 }
 
-// Charge conversations et équipes en parallèle
 function fetchAll() {
   return Promise.all([api<Conversation[]>('/conversations'), api<Team[]>('/teams')]);
 }
@@ -83,44 +77,30 @@ export default function ChatPage({ onLogout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Ce qui est choisi dans le rail : une équipe, ou null = messages privés
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [homeTab, setHomeTab] = useState<'dms' | 'invitations'>('dms');
 
-  // Invitations reçues
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [respondingId, setRespondingId] = useState<string | null>(null);
   const [invitationError, setInvitationError] = useState<string | null>(null);
 
-  // Messages non lus par conversation : { [convId]: number }
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-
-  // Pile de toasts (le plus récent en premier)
   const [toasts, setToasts] = useState<NotificationToast[]>([]);
 
-  // Fenêtres
+  // Modales
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [settingsTeamId, setSettingsTeamId] = useState<string | null>(null);
   const [inviteTeamId, setInviteTeamId] = useState<string | null>(null);
+  const [createEventTeamId, setCreateEventTeamId] = useState<string | null>(null); // NOUVEAU
 
-  // Références stables pour les écouteurs Socket.io
   const conversationsRef = useRef<Conversation[]>([]);
   const teamsRef = useRef<Team[]>([]);
   const selectedIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    conversationsRef.current = conversations;
-  }, [conversations]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+  useEffect(() => { teamsRef.current = teams; }, [teams]);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
 
-  useEffect(() => {
-    teamsRef.current = teams;
-  }, [teams]);
-
-  useEffect(() => {
-    selectedIdRef.current = selectedId;
-  }, [selectedId]);
-
-  // Demander la permission pour les notifications natives du navigateur
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
@@ -133,7 +113,6 @@ export default function ChatPage({ onLogout }: Props) {
     setUnreadCounts(unreadFrom(convs));
   }, []);
 
-  // Rechargement avec écran de chargement (bouton « Réessayer »)
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -147,18 +126,16 @@ export default function ChatPage({ onLogout }: Props) {
     }
   }, [applyData]);
 
-  // Rechargement silencieux. Renvoie les conversations, pour pouvoir en ouvrir une juste après.
   const refresh = useCallback(async (): Promise<Conversation[] | null> => {
     try {
       const [convs, teamList] = await fetchAll();
       applyData(convs, teamList);
       return convs;
     } catch {
-      return null; // en cas d'échec, l'affichage actuel reste en place
+      return null;
     }
   }, [applyData]);
 
-  // Premier chargement : on ouvre la première équipe s'il y en a une
   useEffect(() => {
     let cancelled = false;
     fetchAll()
@@ -177,15 +154,12 @@ export default function ChatPage({ onLogout }: Props) {
       .then((data) => {
         if (!cancelled) setInvitations(data);
       })
-      .catch(() => {
-        // sans invitations, l'onglet reste simplement vide
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [applyData]);
 
-  // Nom complet d'une conversation : « KCorp · #général » ou le pseudo pour un MP
   const fullTitle = useCallback(
     (c: Conversation, teamList: Team[]) => {
       const base = conversationTitle(c, meId);
@@ -195,8 +169,6 @@ export default function ChatPage({ onLogout }: Props) {
     [meId],
   );
 
-  // Ajoute un toast en haut de la pile. Un nouveau message d'une conversation
-  // qui a déjà un toast le met à jour au lieu d'en créer un deuxième.
   const pushToast = useCallback((toast: Omit<NotificationToast, 'count'>) => {
     setToasts((prev) => {
       const existing = prev.find((t) => t.conversationId === toast.conversationId);
@@ -210,8 +182,6 @@ export default function ChatPage({ onLogout }: Props) {
     setToasts((prev) => prev.filter((t) => t.conversationId !== conversationId));
   }, []);
 
-  // Ouvrir une conversation : bonne équipe dans le rail, badge et toast effacés,
-  // lecture enregistrée. teamId peut être fourni quand la liste vient d'être rechargée.
   const openConversation = useCallback(
     (id: string, teamId?: string | null) => {
       const conv = conversationsRef.current.find((c) => c.id === id);
@@ -231,7 +201,6 @@ export default function ChatPage({ onLogout }: Props) {
     [dismissToast],
   );
 
-  // Ouvre le #général d'une équipe (après création ou acceptation)
   const openTeamGeneral = useCallback(
     (convs: Conversation[] | null, teamId: string) => {
       const general = convs?.find((c) => c.teamId === teamId && c.type === 'GENERAL');
@@ -241,7 +210,6 @@ export default function ChatPage({ onLogout }: Props) {
     [openConversation],
   );
 
-  // Ouvre (ou crée) un message privé avec un joueur
   const openDirect = useCallback(
     async (userId: string) => {
       try {
@@ -258,14 +226,13 @@ export default function ChatPage({ onLogout }: Props) {
     [refresh, openConversation],
   );
 
-  // Clic sur un toast : invitation → onglet Invitations, sinon → la conversation
   const handleToastOpen = useCallback(
     (key: string) => {
       if (key.startsWith(INVITE_PREFIX)) {
         dismissToast(key);
         setActiveTeamId(null);
         setHomeTab('invitations');
-        setSelectedId(null); // sur mobile, la liste doit être visible
+        setSelectedId(null);
         return;
       }
       openConversation(key);
@@ -273,13 +240,11 @@ export default function ChatPage({ onLogout }: Props) {
     [dismissToast, openConversation],
   );
 
-  // Réception d'un nouveau message Socket.io
   const handleNewMessage = useCallback(
     (message: Message) => {
       const isFromMe = message.authorId === meId;
       const isCurrentConv = selectedIdRef.current === message.conversationId;
 
-      // 1. Mettre à jour l'aperçu
       const known = conversationsRef.current.some((c) => c.id === message.conversationId);
       if (!known) {
         void refresh();
@@ -292,12 +257,10 @@ export default function ChatPage({ onLogout }: Props) {
         });
       }
 
-      // Message reçu dans la conversation ouverte : on le considère lu
       if (!isFromMe && isCurrentConv) {
         void markConversationRead(message.conversationId);
       }
 
-      // 2. Notifications si ce n'est pas nous et que la conversation n'est pas ouverte
       if (!isFromMe && !isCurrentConv) {
         setUnreadCounts((prev) => ({
           ...prev,
@@ -316,7 +279,6 @@ export default function ChatPage({ onLogout }: Props) {
           content: message.content,
         });
 
-        // Notification native du navigateur (si l'onglet n'est pas visible)
         if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
           try {
             new Notification(`${sender} (${title})`, {
@@ -330,7 +292,6 @@ export default function ChatPage({ onLogout }: Props) {
     [refresh, meId, pushToast, fullTitle],
   );
 
-  // Écouter les nouveaux messages
   useEffect(() => {
     const socket = connectSocket();
     socket.on('message:new', handleNewMessage);
@@ -339,12 +300,9 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, [handleNewMessage]);
 
-  // Accès à un nouveau salon, ou équipes modifiées (membres, rôles, nom, suppression…)
   useEffect(() => {
     const socket = connectSocket();
-    const onChange = () => {
-      void refresh();
-    };
+    const onChange = () => { void refresh(); };
     socket.on('conversation:new', onChange);
     socket.on('teams:changed', onChange);
     return () => {
@@ -353,13 +311,11 @@ export default function ChatPage({ onLogout }: Props) {
     };
   }, [refresh]);
 
-  // Invitations reçues ou annulées en direct
   useEffect(() => {
     const socket = connectSocket();
 
     const onInvitation = (invitation: Invitation) => {
       setInvitations((prev) => [invitation, ...prev.filter((i) => i.id !== invitation.id)]);
-
       const team = invitation.team.name;
       const inviter = invitation.inviter.displayName;
       pushToast({
@@ -369,15 +325,6 @@ export default function ChatPage({ onLogout }: Props) {
         title: team,
         content: "t'invite à rejoindre l'équipe",
       });
-
-      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-        try {
-          new Notification(`Invitation : ${team}`, {
-            body: `${inviter} t'invite à rejoindre l'équipe`,
-            icon: '/favicon.ico',
-          });
-        } catch {}
-      }
     };
 
     const onInvitationRemoved = ({ id }: { id: string }) => {
@@ -397,7 +344,6 @@ export default function ChatPage({ onLogout }: Props) {
     return () => disconnectSocket();
   }, []);
 
-  // Accepter ou refuser une invitation
   const respondToInvitation = async (invitation: Invitation, accept: boolean) => {
     setRespondingId(invitation.id);
     setInvitationError(null);
@@ -412,7 +358,6 @@ export default function ChatPage({ onLogout }: Props) {
       }
     } catch (err) {
       setInvitationError(errorMessage(err));
-      // Expirée ou annulée entre-temps : on la retire de la liste
       if (err instanceof ApiError && err.status === 404) {
         setInvitations((prev) => prev.filter((i) => i.id !== invitation.id));
       }
@@ -425,8 +370,6 @@ export default function ChatPage({ onLogout }: Props) {
     setIsCreateOpen(false);
     openTeamGeneral(await refresh(), team.id);
   };
-
-  // ---------- Données dérivées ----------
 
   const channelsOf = (teamId: string) =>
     conversations
@@ -442,14 +385,12 @@ export default function ChatPage({ onLogout }: Props) {
   const directs = conversations.filter((c) => c.type === 'DIRECT');
   const unreadDirects = directs.reduce((sum, c) => sum + (unreadCounts[c.id] || 0), 0);
 
-  // Si l'équipe active a disparu (supprimée, exclu…), on retombe sur les messages privés
   const activeTeam = activeTeamId ? teams.find((t) => t.id === activeTeamId) : undefined;
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
   const selectedTeam = selected?.teamId ? teams.find((t) => t.id === selected.teamId) : undefined;
   const settingsTeam = settingsTeamId ? teams.find((t) => t.id === settingsTeamId) : undefined;
   const inviteTeam = inviteTeamId ? teams.find((t) => t.id === inviteTeamId) : undefined;
 
-  // Clic sur une équipe dans le rail : sur ordinateur, on ouvre directement son #général
   const selectTeam = (team: Team) => {
     setActiveTeamId(team.id);
     if (selected?.teamId === team.id) return;
@@ -463,8 +404,6 @@ export default function ChatPage({ onLogout }: Props) {
     if (selected && selected.type !== 'DIRECT') setSelectedId(null);
   };
 
-  // ---------- Morceaux d'interface ----------
-
   const countBadge = (count: number, extra = '') =>
     count > 0 ? (
       <span
@@ -474,7 +413,6 @@ export default function ChatPage({ onLogout }: Props) {
       </span>
     ) : null;
 
-  // Barre blanche à gauche d'une icône du rail (comme Discord)
   const railPill = (active: boolean, hasUnread: boolean) => (
     <span
       className={`absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-white transition-all duration-200 ${
@@ -502,11 +440,40 @@ export default function ChatPage({ onLogout }: Props) {
           <span className="text-lg leading-none text-zinc-500">#</span>
           <span className="min-w-0 flex-1 truncate">{c.name}</span>
           {c.type === 'ADMIN' && (
-            <span className="text-xs opacity-70" title="CEO et coachs uniquement">
-              🔒
-            </span>
+            <span className="text-xs opacity-70" title="CEO et coachs uniquement">🔒</span>
           )}
           {countBadge(unread)}
+        </button>
+      </li>
+    );
+  };
+
+  const renderEvent = (e: Event) => {
+    const hasChannel = e.conversationId !== null;
+    return (
+      <li key={e.id}>
+        <button
+          type="button"
+          onClick={() => hasChannel ? openConversation(e.conversationId!) : null}
+          className={`group flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition ${
+            hasChannel ? 'hover:bg-zinc-800/80 cursor-pointer' : 'cursor-default'
+          }`}
+        >
+          <div className="flex justify-between items-center w-full">
+            <span className="text-[14px] font-semibold text-zinc-200">
+              {e.type === 'SCRIM' ? '⚔️ Scrim' : '🏆 Match'} vs {e.opponent}
+            </span>
+            {hasChannel && (
+              <span className="text-[10px] font-bold uppercase text-violet-400 opacity-0 transition-opacity group-hover:opacity-100">
+                Rejoindre ➔
+              </span>
+            )}
+          </div>
+          <span className="text-xs text-zinc-500">
+            {new Date(e.startsAt).toLocaleString('fr-FR', {
+              weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+            })}
+          </span>
         </button>
       </li>
     );
@@ -545,10 +512,17 @@ export default function ChatPage({ onLogout }: Props) {
 
   const sectionTitle = 'px-2 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase';
 
-  // Colonne du milieu quand une équipe est choisie : ses salons
-  const renderTeamPanel = (team: Team) => {
+const renderTeamPanel = (team: Team) => {
     const isPremium = team.owner.plan === 'PREMIUM';
     const canInvite = team.myRole === 'CEO' || (team.myRole === 'COACH' && isPremium);
+    
+    // NOUVEAU : Seuls les admins d'une équipe PREMIUM peuvent créer un événement
+    const canCreateEvent = isPremium && (team.myRole === 'CEO' || team.myRole === 'COACH');
+    
+    const now = Date.now();
+    const allEvents = team.events || [];
+    const upcomingEvents = allEvents.filter(e => new Date(e.startsAt).getTime() > now - SEVEN_DAYS_MS);
+    const archivedEvents = allEvents.filter(e => new Date(e.startsAt).getTime() <= now - SEVEN_DAYS_MS);
 
     return (
       <>
@@ -565,7 +539,6 @@ export default function ChatPage({ onLogout }: Props) {
             onClick={() => setSettingsTeamId(team.id)}
             className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
             title="Paramètres de l'équipe"
-            aria-label="Paramètres de l'équipe"
           >
             ⚙
           </button>
@@ -586,12 +559,42 @@ export default function ChatPage({ onLogout }: Props) {
             <h3 className={sectionTitle}>Salons</h3>
             <ul className="space-y-0.5">{channelsOf(team.id).map(renderChannel)}</ul>
           </section>
+
+          <section className="pt-2 border-t border-zinc-800/50">
+            <div className="flex items-center justify-between px-2 pb-1">
+              <h3 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">Événements</h3>
+              {/* Le bouton n'apparaît que pour les admins d'équipes Premium */}
+              {canCreateEvent && (
+                <button
+                  onClick={() => setCreateEventTeamId(team.id)}
+                  title="Planifier un événement (Premium)"
+                  className="text-zinc-400 hover:text-white transition text-lg leading-none"
+                >
+                  +
+                </button>
+              )}
+            </div>
+            
+            {upcomingEvents.length > 0 ? (
+              <ul className="space-y-1">{upcomingEvents.map(renderEvent)}</ul>
+            ) : (
+              <p className="px-2 py-1 text-xs text-zinc-600 italic">Aucun événement à venir.</p>
+            )}
+          </section>
+
+          {archivedEvents.length > 0 && (
+            <section className="pt-2">
+              <h3 className={sectionTitle}>Archives (+ de 7 jours)</h3>
+              <ul className="space-y-1 opacity-60 hover:opacity-100 transition-opacity">
+                {archivedEvents.map(renderEvent)}
+              </ul>
+            </section>
+          )}
         </div>
       </>
     );
   };
-
-  // Colonne du milieu pour les messages privés et les invitations
+  
   const renderHomePanel = () => {
     const pill = (active: boolean) =>
       `flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition ${
@@ -637,18 +640,12 @@ export default function ChatPage({ onLogout }: Props) {
     );
   };
 
-  // ---------- Rendu ----------
-
   return (
     <div className="fixed inset-0 flex bg-zinc-950 text-zinc-100">
-      {/* Pile de toasts */}
       <ToastStack toasts={toasts} onOpen={handleToastOpen} onDismiss={dismissToast} />
 
-      {/* Navigation : rail + colonne du milieu (cachée sur mobile quand une conversation est ouverte) */}
       <div className={`min-h-0 w-full shrink-0 md:flex md:w-auto ${selected ? 'hidden' : 'flex'}`}>
-        {/* Rail des équipes */}
         <nav className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-zinc-950 py-3">
-          {/* Messages privés */}
           <div className="group relative flex w-full justify-center">
             {railPill(!activeTeam, unreadDirects > 0)}
             <button
@@ -668,7 +665,6 @@ export default function ChatPage({ onLogout }: Props) {
 
           <div className="h-0.5 w-8 rounded-full bg-zinc-800" />
 
-          {/* Une icône par équipe */}
           {teams.map((team) => {
             const active = activeTeam?.id === team.id;
             const unread = unreadOfTeam(team.id);
@@ -693,7 +689,6 @@ export default function ChatPage({ onLogout }: Props) {
             );
           })}
 
-          {/* Créer une équipe */}
           <button
             type="button"
             onClick={() => setIsCreateOpen(true)}
@@ -704,7 +699,6 @@ export default function ChatPage({ onLogout }: Props) {
           </button>
         </nav>
 
-        {/* Colonne du milieu */}
         <aside className="flex min-h-0 min-w-0 flex-1 flex-col bg-zinc-900 md:w-64 md:flex-none">
           {loading ? (
             <p className="p-4 text-sm text-zinc-500">Chargement…</p>
@@ -721,11 +715,10 @@ export default function ChatPage({ onLogout }: Props) {
             renderHomePanel()
           )}
 
-          {/* Mon profil, en bas comme sur Discord */}
-          <UserPanel onLogout={onLogout} onPlanChange={() => void refresh()} />        </aside>
+          <UserPanel onLogout={onLogout} onPlanChange={() => void refresh()} />        
+        </aside>
       </div>
 
-      {/* Conversation sélectionnée */}
       <main className={`min-h-0 min-w-0 flex-1 flex-col bg-zinc-950 ${selected ? 'flex' : 'hidden md:flex'}`}>
         {selected ? (
           <ConversationView
@@ -754,7 +747,6 @@ export default function ChatPage({ onLogout }: Props) {
         )}
       </main>
 
-      {/* Membres à droite, quand un salon d'équipe est ouvert (grands écrans) */}
       {selected && selectedTeam && (
         <MemberList
           key={selectedTeam.id}
@@ -772,7 +764,18 @@ export default function ChatPage({ onLogout }: Props) {
         />
       )}
 
-      {/* Si l'équipe disparaît (supprimée, exclu…), la fenêtre se ferme toute seule */}
+      {/* 📅 MODALE CRÉATION D'ÉVÉNEMENT */}
+      {createEventTeamId && (
+        <CreateEventModal
+          teamId={createEventTeamId}
+          onClose={() => setCreateEventTeamId(null)}
+          onCreated={async () => {
+            setCreateEventTeamId(null);
+            await refresh(); // Recharge la liste des salons et des événements
+          }}
+        />
+      )}
+
       {settingsTeam && (
         <TeamSettingsModal
           key={settingsTeam.id}
