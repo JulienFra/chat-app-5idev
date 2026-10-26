@@ -5,22 +5,24 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ConversationType, Plan, Prisma, TeamRole } from '@prisma/client';
+import { ConversationType, EventType, Plan, Prisma, TeamRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 
-// Limites par plan (le plan est celui du propriétaire de l'équipe)
 export const PLAN_LIMITS: Record<Plan, { maxTeams: number; maxSlots: number }> = {
   FREE: { maxTeams: 1, maxSlots: 5 },
   PREMIUM: { maxTeams: 10, maxSlots: 20 },
 };
 
-// Ce qu'on renvoie avec chaque équipe (jamais d'email ni de hash)
+// AJOUT : On inclut les événements dans la requête pour le frontend
 const teamInclude = {
   owner: { select: { id: true, displayName: true, plan: true } },
   members: {
     include: { user: { select: { id: true, displayName: true } } },
     orderBy: { joinedAt: 'asc' },
+  },
+  events: {
+    orderBy: { startsAt: 'asc' },
   },
 } satisfies Prisma.TeamInclude;
 
@@ -33,9 +35,6 @@ export class TeamsService {
     private readonly realtime: RealtimeGateway,
   ) {}
 
-  // ---------- Lecture ----------
-
-  // Mes équipes, avec membres, rôles et limites
   async listMyTeams(userId: string) {
     const teams = await this.prisma.team.findMany({
       where: { members: { some: { userId } } },
@@ -43,7 +42,6 @@ export class TeamsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    // Premium : #admin est créé à la volée s'il manque (ex : on vient de passer Premium)
     for (const team of teams) {
       if (team.owner.plan === Plan.PREMIUM) await this.ensureAdminChannel(team.id);
     }
@@ -60,7 +58,6 @@ export class TeamsService {
     return this.present(team, userId);
   }
 
-  // Ajoute mon rôle et les limites du plan
   private present(team: TeamWithMembers, userId: string) {
     return {
       ...team,
@@ -68,8 +65,6 @@ export class TeamsService {
       limits: PLAN_LIMITS[team.owner.plan],
     };
   }
-
-  // ---------- Création, renommage, suppression ----------
 
   async create(userId: string, name: string) {
     const user = await this.prisma.user.findUnique({
@@ -118,14 +113,12 @@ export class TeamsService {
   async remove(userId: string, teamId: string) {
     await this.assertOwner(teamId, userId);
 
-    // On note qui était dedans AVANT de supprimer, pour les prévenir ensuite
     const [members, channels] = await Promise.all([
       this.prisma.teamMember.findMany({ where: { teamId }, select: { userId: true } }),
       this.prisma.conversation.findMany({ where: { teamId }, select: { id: true } }),
     ]);
     const memberIds = members.map((m) => m.userId);
 
-    // Supprime en cascade : membres, salons, messages, invitations, events
     await this.prisma.team.delete({ where: { id: teamId } });
 
     for (const channel of channels) {
@@ -134,9 +127,6 @@ export class TeamsService {
     this.realtime.notifyTeamsChanged(memberIds);
   }
 
-  // ---------- Membres et rôles ----------
-
-  // Le CEO change le rôle d'un membre (COACH ou PLAYER)
   async changeRole(ownerId: string, teamId: string, targetUserId: string, role: TeamRole) {
     const team = await this.assertOwner(teamId, ownerId);
     if (targetUserId === ownerId) {
@@ -155,7 +145,6 @@ export class TeamsService {
     await this.notifyTeam(teamId);
   }
 
-  // Exclure : le CEO exclut n'importe qui, un coach exclut seulement des joueurs (Premium)
   async kick(actorId: string, teamId: string, targetUserId: string) {
     if (actorId === targetUserId) {
       throw new BadRequestException('Pour partir, utilise « Quitter l’équipe »');
@@ -190,13 +179,11 @@ export class TeamsService {
     await this.notifyTeam(teamId, [userId]);
   }
 
-  // Transférer la propriété : la cible devient CEO, l'ancien CEO devient coach
   async transfer(ownerId: string, teamId: string, targetUserId: string) {
     const team = await this.assertOwner(teamId, ownerId);
     if (targetUserId === ownerId) throw new BadRequestException('Tu es déjà le CEO');
     await this.getMembership(teamId, targetUserId);
 
-    // Le nouveau propriétaire doit avoir de la place dans SES limites
     const target = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       select: { plan: true, displayName: true },
@@ -225,8 +212,6 @@ export class TeamsService {
     await this.notifyTeam(teamId);
   }
 
-  // ---------- Vérifications (utilisées aussi par les invitations) ----------
-
   async getTeamWithOwner(teamId: string) {
     const team = await this.prisma.team.findUnique({
       where: { id: teamId },
@@ -252,7 +237,6 @@ export class TeamsService {
     return team;
   }
 
-  // Qui peut gérer l'effectif (inviter, exclure) : le CEO, et les coachs en Premium
   async assertCanManageRoster(teamId: string, userId: string) {
     const team = await this.getTeamWithOwner(teamId);
     const membership = await this.prisma.teamMember.findUnique({
@@ -281,8 +265,6 @@ export class TeamsService {
     if (duplicate) throw new ConflictException(`Il existe déjà une équipe nommée « ${name} »`);
   }
 
-  // ---------- Salons ----------
-
   private async ensureAdminChannel(teamId: string) {
     const exists = await this.prisma.conversation.findFirst({
       where: { teamId, type: ConversationType.ADMIN },
@@ -294,8 +276,6 @@ export class TeamsService {
     await this.syncChannels(teamId);
   }
 
-  // Remet les accès aux salons en ordre selon les rôles :
-  // #général et salons d'events = tous les membres, #admin = CEO + coachs
   async syncChannels(teamId: string) {
     const [members, channels] = await Promise.all([
       this.prisma.teamMember.findMany({ where: { teamId }, select: { userId: true, role: true } }),
@@ -330,7 +310,6 @@ export class TeamsService {
     }
   }
 
-  // Prévient tous les membres (et d'éventuels anciens membres) que l'équipe a changé
   async notifyTeam(teamId: string, extraUserIds: string[] = []) {
     const members = await this.prisma.teamMember.findMany({
       where: { teamId },
@@ -338,4 +317,48 @@ export class TeamsService {
     });
     this.realtime.notifyTeamsChanged([...members.map((m) => m.userId), ...extraUserIds]);
   }
-}
+
+// 📅 AJOUT : Logique de création de l'événement et de son salon (Uniquement Premium)
+  async createEvent(userId: string, teamId: string, type: EventType, opponent: string, startsAt: Date) {
+    // 1. Vérifie que le joueur a les droits d'admin (CEO ou COACH)
+    const team = await this.assertCanManageRoster(teamId, userId);
+
+    // 2. VÉRIFICATION STRICTE : Si l'équipe est Free, on bloque la création
+    if (team.owner.plan !== Plan.PREMIUM) {
+      throw new ForbiddenException("La création d'événements est réservée aux équipes Premium.");
+    }
+
+    // Construction du nom du channel automatiquement (ex: scrim-vitality-21-11)
+    const day = startsAt.getDate().toString().padStart(2, '0');
+    const month = (startsAt.getMonth() + 1).toString().padStart(2, '0');
+    const safeOpponent = opponent.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 10);
+    const channelName = `${type.toLowerCase()}-${safeOpponent}-${day}-${month}`;
+
+    // On crée toujours le salon dédié (puisqu'on est sûr d'être Premium ici)
+    const conversation = await this.prisma.conversation.create({
+      data: {
+        teamId,
+        type: ConversationType.EVENT,
+        isGroup: true,
+        name: channelName,
+      },
+    });
+
+    // On crée l'événement en lui attachant l'ID du salon généré
+    const event = await this.prisma.event.create({
+      data: {
+        type,
+        opponent,
+        startsAt,
+        teamId,
+        createdById: userId,
+        conversationId: conversation.id,
+      },
+    });
+
+    await this.syncChannels(teamId);
+    await this.notifyTeam(teamId);
+
+    return event;
+  }
+  }
