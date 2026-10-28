@@ -11,12 +11,12 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { EventType } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TeamsService } from './teams.service';
 import { TeamNameDto } from './dto/team-name.dto';
 import { ChangeRoleDto } from './dto/change-role.dto';
 import { TransferDto } from './dto/transfer.dto';
+import { CreateEventDto } from './dto/create-event.dto';
 
 type AuthRequest = { user: { sub: string } };
 
@@ -87,11 +87,11 @@ export class TeamsController {
     return this.teamsService.transfer(req.user.sub, id, dto.userId);
   }
 
-  // 📅 AJOUT : Créer un événement (et son salon automatiquement)
+  // POST /api/teams/:id/events : planifier un scrim ou un match
   @Post(':id/events')
   createEvent(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: { type: EventType; opponent: string; startsAt: string },
+    @Body() dto: CreateEventDto,
     @Req() req: AuthRequest,
   ) {
     return this.teamsService.createEvent(
@@ -101,5 +101,16 @@ export class TeamsController {
       dto.opponent,
       new Date(dto.startsAt),
     );
+  }
+
+  // DELETE /api/teams/:id/events/:eventId : supprimer un événement (et son salon)
+  @Delete(':id/events/:eventId')
+  @HttpCode(204)
+  deleteEvent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthRequest,
+  ) {
+    return this.teamsService.deleteEvent(req.user.sub, id, eventId);
   }
 }

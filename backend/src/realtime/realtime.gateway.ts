@@ -79,21 +79,25 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     client.emit('users:online_list', Array.from(this.activeSockets.keys()));
   }
 
+  // « X est en train d'écrire » : relayé aux autres membres de la conversation
   @SubscribeMessage('typing')
   handleTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string; isTyping: boolean },
+    @MessageBody() data: unknown,
   ) {
-    const userId = client.data.userId;
-    if (!userId) return;
+    const userId: unknown = client.data.userId;
+    if (typeof userId !== 'string') return;
 
-    client.broadcast
-      .to(conversationRoom(data.conversationId))
-      .emit('typing', {
-        conversationId: data.conversationId,
-        userId,
-        isTyping: data.isTyping,
-      });
+    // Les données viennent du client : on vérifie leur forme
+    if (!data || typeof data !== 'object') return;
+    const { conversationId, isTyping } = data as { conversationId?: unknown; isTyping?: unknown };
+    if (typeof conversationId !== 'string' || typeof isTyping !== 'boolean') return;
+
+    // Seul un membre de la conversation (donc présent dans sa room) peut y signaler qu'il écrit
+    const room = conversationRoom(conversationId);
+    if (!client.rooms.has(room)) return;
+
+    client.broadcast.to(room).emit('typing', { conversationId, userId, isTyping });
   }
 
   emitNewMessage(message: { conversationId: string }) {

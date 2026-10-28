@@ -14,7 +14,11 @@ export const PLAN_LIMITS: Record<Plan, { maxTeams: number; maxSlots: number }> =
   PREMIUM: { maxTeams: 10, maxSlots: 20 },
 };
 
-// AJOUT : On inclut les événements dans la requête pour le frontend
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const MAX_UPCOMING_EVENTS = 50; // événements à venir par équipe (anti-spam)
+
+// Ce qu'on renvoie avec chaque équipe (jamais d'email ni de hash), événements compris
 const teamInclude = {
   owner: { select: { id: true, displayName: true, plan: true } },
   members: {
@@ -318,47 +322,134 @@ export class TeamsService {
     this.realtime.notifyTeamsChanged([...members.map((m) => m.userId), ...extraUserIds]);
   }
 
-// 📅 AJOUT : Logique de création de l'événement et de son salon (Uniquement Premium)
-  async createEvent(userId: string, teamId: string, type: EventType, opponent: string, startsAt: Date) {
-    // 1. Vérifie que le joueur a les droits d'admin (CEO ou COACH)
-    const team = await this.assertCanManageRoster(teamId, userId);
+  // ---------- Événements (scrims et matchs) ----------
 
-    // 2. VÉRIFICATION STRICTE : Si l'équipe est Free, on bloque la création
-    if (team.owner.plan !== Plan.PREMIUM) {
-      throw new ForbiddenException("La création d'événements est réservée aux équipes Premium.");
+  // Créer un événement.
+  // - Premium : CEO et coachs ; un salon dédié est créé (ex : #scrim-vitality-27-10).
+  // - Free : seul le créateur de l'équipe ; l'événement va dans le calendrier, sans salon.
+  async createEvent(
+    userId: string,
+    teamId: string,
+    type: EventType,
+    opponent: string,
+    startsAt: Date,
+  ) {
+    // Mêmes droits que pour gérer l'effectif (CEO, + coachs en Premium)
+    const team = await this.assertCanManageRoster(teamId, userId);
+    const premium = team.owner.plan === Plan.PREMIUM;
+
+    // Pas d'événement dans le passé (1 h de marge), ni à plus d'un an
+    const now = Date.now();
+    if (startsAt.getTime() < now - HOUR_MS) {
+      throw new BadRequestException("La date de l'événement est déjà passée");
+    }
+    if (startsAt.getTime() > now + 365 * DAY_MS) {
+      throw new BadRequestException("L'événement ne peut pas être prévu à plus d'un an");
     }
 
-    // Construction du nom du channel automatiquement (ex: scrim-vitality-21-11)
-    const day = startsAt.getDate().toString().padStart(2, '0');
-    const month = (startsAt.getMonth() + 1).toString().padStart(2, '0');
-    const safeOpponent = opponent.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 10);
-    const channelName = `${type.toLowerCase()}-${safeOpponent}-${day}-${month}`;
+    // Anti-spam : nombre d'événements à venir limité par équipe
+    const upcoming = await this.prisma.event.count({
+      where: { teamId, startsAt: { gt: new Date(now) } },
+    });
+    if (upcoming >= MAX_UPCOMING_EVENTS) {
+      throw new ConflictException(
+        `Cette équipe a déjà ${MAX_UPCOMING_EVENTS} événements à venir. Supprimes-en avant d'en créer un autre.`,
+      );
+    }
 
-    // On crée toujours le salon dédié (puisqu'on est sûr d'être Premium ici)
-    const conversation = await this.prisma.conversation.create({
-      data: {
-        teamId,
-        type: ConversationType.EVENT,
-        isGroup: true,
-        name: channelName,
-      },
+    const event = await this.prisma.$transaction(async (tx) => {
+      // Salon dédié : Premium uniquement
+      let conversationId: string | null = null;
+      if (premium) {
+        const name = await this.uniqueChannelName(tx, teamId, eventChannelBase(type, opponent, startsAt));
+        const conversation = await tx.conversation.create({
+          data: { teamId, type: ConversationType.EVENT, isGroup: true, name },
+        });
+        conversationId = conversation.id;
+      }
+
+      return tx.event.create({
+        data: { type, opponent, startsAt, teamId, createdById: userId, conversationId },
+      });
     });
 
-    // On crée l'événement en lui attachant l'ID du salon généré
-    const event = await this.prisma.event.create({
-      data: {
-        type,
-        opponent,
-        startsAt,
-        teamId,
-        createdById: userId,
-        conversationId: conversation.id,
-      },
-    });
-
-    await this.syncChannels(teamId);
+    if (event.conversationId) await this.syncChannels(teamId); // accès au salon pour tous les membres
     await this.notifyTeam(teamId);
-
     return event;
   }
+
+  // Supprimer un événement (et son salon dédié s'il en a un)
+  async deleteEvent(userId: string, teamId: string, eventId: string) {
+    await this.assertCanManageRoster(teamId, userId);
+
+    const event = await this.prisma.event.findFirst({ where: { id: eventId, teamId } });
+    if (!event) throw new NotFoundException('Événement introuvable');
+
+    // On note qui avait accès au salon AVANT de le supprimer
+    const channelMembers = event.conversationId
+      ? await this.prisma.membership.findMany({
+          where: { conversationId: event.conversationId },
+          select: { userId: true },
+        })
+      : [];
+
+    await this.prisma.$transaction([
+      this.prisma.event.delete({ where: { id: event.id } }),
+      ...(event.conversationId
+        ? [this.prisma.conversation.delete({ where: { id: event.conversationId } })]
+        : []),
+    ]);
+
+    if (event.conversationId) {
+      this.realtime.removeMembersFromConversation(
+        channelMembers.map((m) => m.userId),
+        event.conversationId,
+      );
+    }
+    await this.notifyTeam(teamId);
   }
+
+  // « scrim-vitality-27-10 » existe déjà dans l'équipe ? → « scrim-vitality-27-10-2 », etc.
+  private async uniqueChannelName(
+    tx: Prisma.TransactionClient,
+    teamId: string,
+    base: string,
+  ): Promise<string> {
+    const existing = await tx.conversation.findMany({
+      where: { teamId, name: { startsWith: base } },
+      select: { name: true },
+    });
+    const taken = new Set(existing.map((c) => c.name));
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(`${base}-${n}`)) n++;
+    return `${base}-${n}`;
+  }
+}
+
+// ---------- Utilitaires événements ----------
+
+// Nom du salon : type, adversaire et date (jour/mois, heure de Bruxelles)
+// ex : MATCH, « Équipe Rouge », 27/10 → « match-equipe-rouge-27-10 »
+function eventChannelBase(type: EventType, opponent: string, startsAt: Date): string {
+  const slug =
+    opponent
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // retire les accents
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 20)
+      .replace(/-+$/g, '') || 'adversaire';
+
+  // L'heure du serveur est en UTC : on calcule la date dans le fuseau des joueurs
+  const parts = new Intl.DateTimeFormat('fr-BE', {
+    timeZone: 'Europe/Brussels',
+    day: '2-digit',
+    month: '2-digit',
+  }).formatToParts(startsAt);
+  const day = parts.find((p) => p.type === 'day')?.value ?? '00';
+  const month = parts.find((p) => p.type === 'month')?.value ?? '00';
+
+  return `${type.toLowerCase()}-${slug}-${day}-${month}`;
+}

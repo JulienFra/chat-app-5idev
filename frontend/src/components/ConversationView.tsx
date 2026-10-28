@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { api, conversationTitle, errorMessage } from '../api';
 import { connectSocket } from '../socket';
 import type { Conversation, Message } from '../types';
@@ -41,6 +41,7 @@ export default function ConversationView({
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentRef = useRef(0); // dernier envoi de « j'écris », pour ne pas en envoyer à chaque touche
 
   const memberships = conversation.memberships ?? [];
 
@@ -119,17 +120,32 @@ export default function ConversationView({
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
 
-  const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // « Je suis en train d'écrire » : au plus un envoi toutes les 1,5 s (les autres le gardent 3 s),
+  // puis « j'ai arrêté » 2 s après la dernière touche
+  const TYPING_THROTTLE_MS = 1500;
+  const handleTyping = (e: ChangeEvent<HTMLInputElement>) => {
     setDraft(e.target.value);
 
     const socket = connectSocket();
-    socket.emit('typing', { conversationId: conversation.id, isTyping: true });
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > TYPING_THROTTLE_MS) {
+      socket.emit('typing', { conversationId: conversation.id, isTyping: true });
+      lastTypingSentRef.current = now;
+    }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       socket.emit('typing', { conversationId: conversation.id, isTyping: false });
+      lastTypingSentRef.current = 0;
     }, 2000);
   };
+
+  // En quittant la conversation : on arrête le minuteur « j'ai arrêté d'écrire »
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
 
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
@@ -140,6 +156,7 @@ export default function ConversationView({
     setSendError(null);
     
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    lastTypingSentRef.current = 0;
     const socket = connectSocket();
     socket.emit('typing', { conversationId: conversation.id, isTyping: false });
 
