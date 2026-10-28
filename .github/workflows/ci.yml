@@ -52,6 +52,8 @@ jobs:
 
     env:
       DATABASE_URL: "postgresql://test_user:test_password@localhost:5432/chatapp_test?schema=public"
+      # Clé de test uniquement (la vraie clé de prod reste dans le .env du VPS)
+      JWT_SECRET: "cle-de-test-ci-uniquement"
 
     steps:
       - name: Récupérer le code
@@ -78,8 +80,11 @@ jobs:
       - name: Compiler le backend
         run: npm --prefix backend run build
 
-      - name: Lancer la suite de tests (jest)
+      - name: Lancer les tests unitaires (jest)
         run: npm --prefix backend test
+
+      - name: Lancer les tests de bout en bout (e2e, vraie base PostgreSQL)
+        run: npm --prefix backend run test:e2e -- --runInBand
 
   frontend:
     name: Frontend (lint, build)
@@ -100,6 +105,9 @@ jobs:
 
       - name: Vérifier le style du code (oxlint)
         run: npm --prefix frontend run lint
+
+      - name: Lancer les tests unitaires (vitest)
+        run: npm --prefix frontend test
 
       - name: Compiler le frontend
         run: npm --prefix frontend run build
