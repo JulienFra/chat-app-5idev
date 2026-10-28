@@ -13,6 +13,16 @@ import AddMemberModal from './components/AddMemberModal';
 import ConversationView from './components/ConversationView';
 import CreateTeamModal from './components/CreateTeamModal';
 import CreateEventModal from './components/CreateEventModal';
+import MyEventsList from './components/MyEventsList';
+import {
+  EVENT_DURATION_MS,
+  eventLabel,
+  eventsOfTeams,
+  findConflicts,
+  formatEventDate,
+  isArchived,
+  useNow,
+} from './events';
 import InvitationsList from './components/InvitationsList';
 import MemberList from './components/MemberList';
 import TeamSettingsModal from './components/TeamSettingsModal';
@@ -25,7 +35,6 @@ interface Props {
 
 const MAX_TOASTS = 3;
 const INVITE_PREFIX = 'invite:';
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours en millisecondes
 
 const CHANNEL_ORDER: Record<ConversationType, number> = {
   GENERAL: 0,
@@ -71,6 +80,7 @@ const isDesktop = () => window.matchMedia('(min-width: 768px)').matches;
 
 export default function ChatPage({ onLogout }: Props) {
   const meId = getCurrentUserId();
+  const now = useNow(); // heure actuelle, mise à jour toutes les 30 s
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +88,9 @@ export default function ChatPage({ onLogout }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
-  const [homeTab, setHomeTab] = useState<'dms' | 'invitations'>('dms');
+  const [homeTab, setHomeTab] = useState<'dms' | 'invitations' | 'events'>('dms');
+  // Section « Archives » dépliée ou non, par équipe
+  const [openArchives, setOpenArchives] = useState<Record<string, boolean>>({});
 
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [respondingId, setRespondingId] = useState<string | null>(null);
@@ -91,7 +103,7 @@ export default function ChatPage({ onLogout }: Props) {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [settingsTeamId, setSettingsTeamId] = useState<string | null>(null);
   const [inviteTeamId, setInviteTeamId] = useState<string | null>(null);
-  const [createEventTeamId, setCreateEventTeamId] = useState<string | null>(null); // NOUVEAU
+  const [createEventTeamId, setCreateEventTeamId] = useState<string | null>(null);
 
   const conversationsRef = useRef<Conversation[]>([]);
   const teamsRef = useRef<Team[]>([]);
@@ -325,6 +337,16 @@ export default function ChatPage({ onLogout }: Props) {
         title: team,
         content: "t'invite à rejoindre l'équipe",
       });
+
+      // Notification native du navigateur (si l'onglet n'est pas visible)
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        try {
+          new Notification(`Invitation : ${team}`, {
+            body: `${inviter} t'invite à rejoindre l'équipe`,
+            icon: '/favicon.ico',
+          });
+        } catch {}
+      }
     };
 
     const onInvitationRemoved = ({ id }: { id: string }) => {
@@ -385,11 +407,20 @@ export default function ChatPage({ onLogout }: Props) {
   const directs = conversations.filter((c) => c.type === 'DIRECT');
   const unreadDirects = directs.reduce((sum, c) => sum + (unreadCounts[c.id] || 0), 0);
 
+  // Événements de toutes mes équipes, et ceux qui se chevauchent (pas encore terminés)
+  const myEvents = eventsOfTeams(teams);
+  const conflictMap = findConflicts(
+    myEvents.filter((e) => new Date(e.startsAt).getTime() > now - EVENT_DURATION_MS),
+  );
+
   const activeTeam = activeTeamId ? teams.find((t) => t.id === activeTeamId) : undefined;
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
   const selectedTeam = selected?.teamId ? teams.find((t) => t.id === selected.teamId) : undefined;
   const settingsTeam = settingsTeamId ? teams.find((t) => t.id === settingsTeamId) : undefined;
   const inviteTeam = inviteTeamId ? teams.find((t) => t.id === inviteTeamId) : undefined;
+  const createEventTeam = createEventTeamId
+    ? teams.find((t) => t.id === createEventTeamId)
+    : undefined;
 
   const selectTeam = (team: Team) => {
     setActiveTeamId(team.id);
@@ -448,33 +479,63 @@ export default function ChatPage({ onLogout }: Props) {
     );
   };
 
-  const renderEvent = (e: Event) => {
-    const hasChannel = e.conversationId !== null;
+  // Supprimer un événement (et son salon dédié)
+  const deleteEvent = async (teamId: string, event: Event) => {
+    const warning = event.conversationId ? ' Son salon et tous ses messages seront supprimés.' : '';
+    if (!window.confirm(`Supprimer « ${eventLabel(event)} » ?${warning}`)) return;
+    try {
+      await api(`/teams/${teamId}/events/${event.id}`, { method: 'DELETE' });
+      await refresh();
+    } catch (err) {
+      window.alert(errorMessage(err));
+    }
+  };
+
+  // Un événement dans la colonne de l'équipe : clic = ouvrir son salon (Premium)
+  const renderEvent = (e: Event, teamId: string, canManage: boolean) => {
+    const channelId = e.conversationId;
+    const openable = channelId !== null && conversations.some((c) => c.id === channelId);
+    const active = channelId !== null && channelId === selectedId;
+    const unread = channelId ? unreadCounts[channelId] || 0 : 0;
+    const conflicted = conflictMap.has(e.id);
+
     return (
-      <li key={e.id}>
+      <li key={e.id} className="group/event relative">
         <button
           type="button"
-          onClick={() => hasChannel ? openConversation(e.conversationId!) : null}
-          className={`group flex w-full flex-col gap-1 rounded-md px-2 py-1.5 text-left transition ${
-            hasChannel ? 'hover:bg-zinc-800/80 cursor-pointer' : 'cursor-default'
+          disabled={!openable}
+          onClick={() => channelId && openConversation(channelId)}
+          className={`flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition ${
+            active ? 'bg-zinc-700/60' : openable ? 'hover:bg-zinc-800/80' : 'cursor-default'
           }`}
         >
-          <div className="flex justify-between items-center w-full">
-            <span className="text-[14px] font-semibold text-zinc-200">
-              {e.type === 'SCRIM' ? '⚔️ Scrim' : '🏆 Match'} vs {e.opponent}
+          <span className="flex w-full items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-zinc-200">
+              {eventLabel(e)}
             </span>
-            {hasChannel && (
-              <span className="text-[10px] font-bold uppercase text-violet-400 opacity-0 transition-opacity group-hover:opacity-100">
-                Rejoindre ➔
+            {conflicted && (
+              <span className="text-xs" title="Un autre de tes événements a lieu en même temps">
+                ⚠️
               </span>
             )}
-          </div>
+            {countBadge(unread)}
+          </span>
           <span className="text-xs text-zinc-500">
-            {new Date(e.startsAt).toLocaleString('fr-FR', {
-              weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
-            })}
+            {formatEventDate(e.startsAt)}
+            {!channelId && ' · calendrier'}
           </span>
         </button>
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => void deleteEvent(teamId, e)}
+            title="Supprimer l'événement"
+            aria-label="Supprimer l'événement"
+            className="absolute right-1.5 bottom-1.5 hidden rounded px-1 text-xs text-zinc-500 group-hover/event:block hover:bg-red-500/15 hover:text-red-400"
+          >
+            ✕
+          </button>
+        )}
       </li>
     );
   };
@@ -512,17 +573,22 @@ export default function ChatPage({ onLogout }: Props) {
 
   const sectionTitle = 'px-2 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase';
 
-const renderTeamPanel = (team: Team) => {
+  const renderTeamPanel = (team: Team) => {
     const isPremium = team.owner.plan === 'PREMIUM';
     const canInvite = team.myRole === 'CEO' || (team.myRole === 'COACH' && isPremium);
-    
-    // NOUVEAU : Seuls les admins d'une équipe PREMIUM peuvent créer un événement
-    const canCreateEvent = isPremium && (team.myRole === 'CEO' || team.myRole === 'COACH');
-    
-    const now = Date.now();
-    const allEvents = team.events || [];
-    const upcomingEvents = allEvents.filter(e => new Date(e.startsAt).getTime() > now - SEVEN_DAYS_MS);
-    const archivedEvents = allEvents.filter(e => new Date(e.startsAt).getTime() <= now - SEVEN_DAYS_MS);
+
+    // Mêmes règles que le serveur : le CEO, et les coachs en Premium.
+    // En Free, l'événement va dans le calendrier, sans salon dédié.
+    const canManageEvents = team.myRole === 'CEO' || (team.myRole === 'COACH' && isPremium);
+
+    // Archivé = plus de 7 jours après la date. Le salon reste accessible et on peut y écrire.
+    const allEvents = team.events ?? [];
+    const activeEvents = allEvents.filter((e) => !isArchived(e, now));
+    const archivedEvents = allEvents.filter((e) => isArchived(e, now)).reverse(); // plus récents d'abord
+    const archivesOpen = openArchives[team.id] ?? false;
+
+    // Les salons d'events sont affichés dans « Événements », pas dans « Salons »
+    const fixedChannels = channelsOf(team.id).filter((c) => c.type !== 'EVENT');
 
     return (
       <>
@@ -539,6 +605,7 @@ const renderTeamPanel = (team: Team) => {
             onClick={() => setSettingsTeamId(team.id)}
             className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
             title="Paramètres de l'équipe"
+            aria-label="Paramètres de l'équipe"
           >
             ⚙
           </button>
@@ -557,57 +624,72 @@ const renderTeamPanel = (team: Team) => {
 
           <section>
             <h3 className={sectionTitle}>Salons</h3>
-            <ul className="space-y-0.5">{channelsOf(team.id).map(renderChannel)}</ul>
+            <ul className="space-y-0.5">{fixedChannels.map(renderChannel)}</ul>
           </section>
 
-          <section className="pt-2 border-t border-zinc-800/50">
+          <section className="border-t border-zinc-800/50 pt-3">
             <div className="flex items-center justify-between px-2 pb-1">
-              <h3 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">Événements</h3>
-              {/* Le bouton n'apparaît que pour les admins d'équipes Premium */}
-              {canCreateEvent && (
+              <h3 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">
+                Événements
+              </h3>
+              {canManageEvents && (
                 <button
+                  type="button"
                   onClick={() => setCreateEventTeamId(team.id)}
-                  title="Planifier un événement (Premium)"
-                  className="text-zinc-400 hover:text-white transition text-lg leading-none"
+                  title="Planifier un scrim ou un match"
+                  aria-label="Planifier un événement"
+                  className="rounded px-1 text-lg leading-none text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
                 >
                   +
                 </button>
               )}
             </div>
-            
-            {upcomingEvents.length > 0 ? (
-              <ul className="space-y-1">{upcomingEvents.map(renderEvent)}</ul>
+
+            {activeEvents.length > 0 ? (
+              <ul className="space-y-0.5">
+                {activeEvents.map((e) => renderEvent(e, team.id, canManageEvents))}
+              </ul>
             ) : (
-              <p className="px-2 py-1 text-xs text-zinc-600 italic">Aucun événement à venir.</p>
+              <p className="px-2 py-1 text-xs text-zinc-600 italic">Aucun événement prévu.</p>
             )}
           </section>
 
           {archivedEvents.length > 0 && (
-            <section className="pt-2">
-              <h3 className={sectionTitle}>Archives (+ de 7 jours)</h3>
-              <ul className="space-y-1 opacity-60 hover:opacity-100 transition-opacity">
-                {archivedEvents.map(renderEvent)}
-              </ul>
+            <section>
+              <button
+                type="button"
+                onClick={() => setOpenArchives((prev) => ({ ...prev, [team.id]: !archivesOpen }))}
+                className="flex w-full items-center gap-1 px-2 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase hover:text-zinc-300"
+              >
+                <span className={`transition-transform ${archivesOpen ? 'rotate-90' : ''}`}>▸</span>
+                Archives ({archivedEvents.length})
+              </button>
+              {archivesOpen && (
+                <ul className="space-y-0.5 opacity-70">
+                  {archivedEvents.map((e) => renderEvent(e, team.id, canManageEvents))}
+                </ul>
+              )}
             </section>
           )}
         </div>
       </>
     );
   };
-  
+
   const renderHomePanel = () => {
     const pill = (active: boolean) =>
-      `flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition ${
+      `flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-[13px] font-medium transition ${
         active ? 'bg-zinc-700/60 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
       }`;
+    const titles = { dms: 'Messages privés', invitations: 'Invitations', events: 'Mes événements' };
     return (
       <>
         <header className="flex h-14 shrink-0 items-center border-b border-zinc-800/80 px-4 shadow-sm">
-          <h2 className="font-bold text-white">Messages privés</h2>
+          <h2 className="font-bold text-white">{titles[homeTab]}</h2>
         </header>
         <div className="flex gap-1 p-2">
           <button type="button" className={pill(homeTab === 'dms')} onClick={() => setHomeTab('dms')}>
-            Discussions
+            Messages
           </button>
           <button
             type="button"
@@ -621,6 +703,18 @@ const renderTeamPanel = (team: Team) => {
               </span>
             )}
           </button>
+          <button
+            type="button"
+            className={pill(homeTab === 'events')}
+            onClick={() => setHomeTab('events')}
+          >
+            Events
+            {conflictMap.size > 0 && (
+              <span title="Des événements se chevauchent" className="text-[11px]">
+                ⚠️
+              </span>
+            )}
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-4">
           {homeTab === 'invitations' ? (
@@ -629,6 +723,12 @@ const renderTeamPanel = (team: Team) => {
               respondingId={respondingId}
               error={invitationError}
               onRespond={(inv, accept) => void respondToInvitation(inv, accept)}
+            />
+          ) : homeTab === 'events' ? (
+            <MyEventsList
+              events={myEvents}
+              canOpen={(conversationId) => conversations.some((c) => c.id === conversationId)}
+              onOpen={(conversationId) => openConversation(conversationId)}
             />
           ) : directs.length === 0 ? (
             <p className="px-2 py-4 text-sm text-zinc-500">Aucun message privé pour l'instant.</p>
@@ -651,7 +751,7 @@ const renderTeamPanel = (team: Team) => {
             <button
               type="button"
               onClick={selectHome}
-              title="Messages privés et invitations"
+              title="Messages privés, invitations et événements"
               className={`grid size-12 place-items-center text-xl transition-all duration-200 ${
                 !activeTeam
                   ? 'rounded-2xl bg-indigo-500 text-white'
@@ -715,7 +815,7 @@ const renderTeamPanel = (team: Team) => {
             renderHomePanel()
           )}
 
-          <UserPanel onLogout={onLogout} onPlanChange={() => void refresh()} />        
+          <UserPanel onLogout={onLogout} onPlanChange={() => void refresh()} />
         </aside>
       </div>
 
@@ -764,14 +864,15 @@ const renderTeamPanel = (team: Team) => {
         />
       )}
 
-      {/* 📅 MODALE CRÉATION D'ÉVÉNEMENT */}
-      {createEventTeamId && (
+      {/* Planifier un scrim ou un match */}
+      {createEventTeam && (
         <CreateEventModal
-          teamId={createEventTeamId}
+          teamId={createEventTeam.id}
+          isPremium={createEventTeam.owner.plan === 'PREMIUM'}
           onClose={() => setCreateEventTeamId(null)}
           onCreated={async () => {
             setCreateEventTeamId(null);
-            await refresh(); // Recharge la liste des salons et des événements
+            await refresh(); // recharge les salons et les événements
           }}
         />
       )}
