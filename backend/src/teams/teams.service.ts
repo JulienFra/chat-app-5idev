@@ -431,7 +431,7 @@ export class TeamsService {
 
 // Nom du salon : type, adversaire et date (jour/mois, heure de Bruxelles)
 // ex : MATCH, « Équipe Rouge », 27/10 → « match-equipe-rouge-27-10 »
-function eventChannelBase(type: EventType, opponent: string, startsAt: Date): string {
+export function eventChannelBase(type: EventType, opponent: string, startsAt: Date): string {
   const slug =
     opponent
       .normalize('NFD')
