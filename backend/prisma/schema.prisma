@@ -86,6 +86,7 @@ model Membership {
 model Message {
   id             String       @id @default(uuid())
   content        String
+  imageUrl       String?      
   createdAt      DateTime     @default(now())
 
   author         User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
@@ -172,3 +173,4 @@ enum EventType {
   SCRIM
   MATCH
 }
+
