@@ -33,6 +33,7 @@ export interface Membership {
 export interface Message {
   id: string;
   content: string;
+  imageUrl?: string | null;
   createdAt: string;
   authorId: string;
   conversationId: string;
