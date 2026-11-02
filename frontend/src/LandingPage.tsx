@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LegalLinks } from './LegalPage';
 
 interface Props {
   onGetStarted: () => void;
@@ -304,7 +305,9 @@ export default function LandingPage({ onGetStarted, onLogin }: Props) {
               </div>
               <button
                 type="button"
-                onClick={onGetStarted}
+                onClick={() => {
+                  window.location.hash = '#/contact';
+                }}
                 className="mt-8 w-full rounded-xl border border-zinc-700 bg-zinc-800/50 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800"
               >
                 Contacter l'équipe
@@ -358,6 +361,7 @@ export default function LandingPage({ onGetStarted, onLogin }: Props) {
 
       {/* Footer */}
       <footer className="border-t border-zinc-900 bg-zinc-950 px-6 py-8 text-center text-xs text-zinc-600">
+        <LegalLinks className="mb-3" />
         <p>© 2026 ChatPulse — Projet chat-app-5idev (Édition E-sport). Tous droits réservés.</p>
       </footer>
     </div>

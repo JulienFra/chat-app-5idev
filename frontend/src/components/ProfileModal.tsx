@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { api, errorMessage } from '../api';
 import type { Profile } from '../types';
+import { LegalLinks } from '../LegalPage';
 
 interface Props {
   profile: Profile;
@@ -213,6 +214,7 @@ export default function ProfileModal({ profile, onClose, onChange, onLogoutReque
           >
             ⏻ Se déconnecter
           </button>
+          <LegalLinks className="mt-4 text-xs text-zinc-500" />
         </section>
       </div>
     </div>
