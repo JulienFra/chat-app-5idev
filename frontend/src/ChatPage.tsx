@@ -43,27 +43,6 @@ const CHANNEL_ORDER: Record<ConversationType, number> = {
   DIRECT: 3,
 };
 
-const TEAM_COLORS = [
-  'from-violet-500 to-indigo-600',
-  'from-rose-500 to-orange-500',
-  'from-emerald-500 to-teal-600',
-  'from-sky-500 to-blue-600',
-  'from-amber-500 to-red-500',
-  'from-fuchsia-500 to-purple-600',
-];
-
-function teamColor(id: string): string {
-  let hash = 0;
-  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return TEAM_COLORS[hash % TEAM_COLORS.length];
-}
-
-function initials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  return name.trim().slice(0, 2).toUpperCase();
-}
-
 function unreadFrom(list: Conversation[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const c of list) {
@@ -78,9 +57,59 @@ function fetchAll() {
 
 const isDesktop = () => window.matchMedia('(min-width: 768px)').matches;
 
+const monogram = (name: string) => name.trim().slice(0, 2).toUpperCase();
+
+const dayOf = (iso: string) => new Date(iso).getDate();
+const monthOf = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '');
+
+const NO_SCROLLBAR = '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
+
+function Badge({ count }: { count: number }) {
+  return (
+    <span className="min-w-[22px] rounded-full bg-[#d7ff3a] px-1.5 py-0.5 text-center text-xs font-bold leading-4 text-black tabular-nums">
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
+function SectionTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between px-5 pb-2 pt-6">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#9aa1ab]">{children}</h3>
+      {action}
+    </div>
+  );
+}
+
+const HashIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <path d="M6 2 4.5 14M11.5 2 10 14M2.5 5.5h11.5M2 10.5h11.5" />
+  </svg>
+);
+
+const LockIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="7" width="10" height="7" rx="1.5" />
+    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.7 9h6.6l.7-9" />
+  </svg>
+);
+
+const PlusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M8 2v12M2 8h12" />
+  </svg>
+);
+
 export default function ChatPage({ onLogout }: Props) {
   const meId = getCurrentUserId();
-  const now = useNow(); // heure actuelle, mise à jour toutes les 30 s
+  const now = useNow();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,7 +118,6 @@ export default function ChatPage({ onLogout }: Props) {
 
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [homeTab, setHomeTab] = useState<'dms' | 'invitations' | 'events'>('dms');
-  // Section « Archives » dépliée ou non, par équipe
   const [openArchives, setOpenArchives] = useState<Record<string, boolean>>({});
 
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -99,7 +127,6 @@ export default function ChatPage({ onLogout }: Props) {
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [toasts, setToasts] = useState<NotificationToast[]>([]);
 
-  // Modales
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [settingsTeamId, setSettingsTeamId] = useState<string | null>(null);
   const [inviteTeamId, setInviteTeamId] = useState<string | null>(null);
@@ -124,19 +151,6 @@ export default function ChatPage({ onLogout }: Props) {
     setTeams(teamList);
     setUnreadCounts(unreadFrom(convs));
   }, []);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [convs, teamList] = await fetchAll();
-      applyData(convs, teamList);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [applyData]);
 
   const refresh = useCallback(async (): Promise<Conversation[] | null> => {
     try {
@@ -290,15 +304,6 @@ export default function ChatPage({ onLogout }: Props) {
           title,
           content: message.content,
         });
-
-        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-          try {
-            new Notification(`${sender} (${title})`, {
-              body: message.content,
-              icon: '/favicon.ico',
-            });
-          } catch {}
-        }
       }
     },
     [refresh, meId, pushToast, fullTitle],
@@ -325,7 +330,6 @@ export default function ChatPage({ onLogout }: Props) {
 
   useEffect(() => {
     const socket = connectSocket();
-
     const onInvitation = (invitation: Invitation) => {
       setInvitations((prev) => [invitation, ...prev.filter((i) => i.id !== invitation.id)]);
       const team = invitation.team.name;
@@ -337,16 +341,6 @@ export default function ChatPage({ onLogout }: Props) {
         title: team,
         content: "t'invite à rejoindre l'équipe",
       });
-
-      // Notification native du navigateur (si l'onglet n'est pas visible)
-      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-        try {
-          new Notification(`Invitation : ${team}`, {
-            body: `${inviter} t'invite à rejoindre l'équipe`,
-            icon: '/favicon.ico',
-          });
-        } catch {}
-      }
     };
 
     const onInvitationRemoved = ({ id }: { id: string }) => {
@@ -407,7 +401,6 @@ export default function ChatPage({ onLogout }: Props) {
   const directs = conversations.filter((c) => c.type === 'DIRECT');
   const unreadDirects = directs.reduce((sum, c) => sum + (unreadCounts[c.id] || 0), 0);
 
-  // Événements de toutes mes équipes, et ceux qui se chevauchent (pas encore terminés)
   const myEvents = eventsOfTeams(teams);
   const conflictMap = findConflicts(
     myEvents.filter((e) => new Date(e.startsAt).getTime() > now - EVENT_DURATION_MS),
@@ -435,51 +428,6 @@ export default function ChatPage({ onLogout }: Props) {
     if (selected && selected.type !== 'DIRECT') setSelectedId(null);
   };
 
-  const countBadge = (count: number, extra = '') =>
-    count > 0 ? (
-      <span
-        className={`min-w-5 rounded-full bg-red-500 px-1.5 text-center text-[11px] leading-5 font-bold text-white ${extra}`}
-      >
-        {count > 99 ? '99+' : count}
-      </span>
-    ) : null;
-
-  const railPill = (active: boolean, hasUnread: boolean) => (
-    <span
-      className={`absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-white transition-all duration-200 ${
-        active ? 'h-10' : hasUnread ? 'h-2 group-hover:h-5' : 'h-0 group-hover:h-5'
-      }`}
-    />
-  );
-
-  const renderChannel = (c: Conversation) => {
-    const active = c.id === selectedId;
-    const unread = unreadCounts[c.id] || 0;
-    return (
-      <li key={c.id}>
-        <button
-          type="button"
-          onClick={() => openConversation(c.id)}
-          className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[15px] transition ${
-            active
-              ? 'bg-zinc-700/60 text-white'
-              : unread > 0
-                ? 'font-semibold text-white hover:bg-zinc-800/80'
-                : 'text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-200'
-          }`}
-        >
-          <span className="text-lg leading-none text-zinc-500">#</span>
-          <span className="min-w-0 flex-1 truncate">{c.name}</span>
-          {c.type === 'ADMIN' && (
-            <span className="text-xs opacity-70" title="CEO et coachs uniquement">🔒</span>
-          )}
-          {countBadge(unread)}
-        </button>
-      </li>
-    );
-  };
-
-  // Supprimer un événement (et son salon dédié)
   const deleteEvent = async (teamId: string, event: Event) => {
     const warning = event.conversationId ? ' Son salon et tous ses messages seront supprimés.' : '';
     if (!window.confirm(`Supprimer « ${eventLabel(event)} » ?${warning}`)) return;
@@ -491,409 +439,383 @@ export default function ChatPage({ onLogout }: Props) {
     }
   };
 
-  // Un événement dans la colonne de l'équipe : clic = ouvrir son salon (Premium)
-  const renderEvent = (e: Event, teamId: string, canManage: boolean) => {
-    const channelId = e.conversationId;
-    const openable = channelId !== null && conversations.some((c) => c.id === channelId);
-    const active = channelId !== null && channelId === selectedId;
-    const unread = channelId ? unreadCounts[channelId] || 0 : 0;
-    const conflicted = conflictMap.has(e.id);
+  const renderChannel = (c: Conversation) => {
+    const active = c.id === selectedId;
+    const unread = unreadCounts[c.id] || 0;
+    const isDirect = c.type === 'DIRECT';
+    const label = isDirect ? conversationTitle(c, meId) : c.name;
 
     return (
-      <li key={e.id} className="group/event relative">
+      <li key={c.id} className="px-3">
         <button
           type="button"
-          disabled={!openable}
-          onClick={() => channelId && openConversation(channelId)}
-          className={`flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition ${
-            active ? 'bg-zinc-700/60' : openable ? 'hover:bg-zinc-800/80' : 'cursor-default'
+          onClick={() => openConversation(c.id)}
+          className={`relative flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-[15px] transition-colors ${
+            active
+              ? 'bg-[#1c2025] text-white'
+              : unread > 0
+                ? 'text-white hover:bg-[#15181c]'
+                : 'text-[#aab1bb] hover:bg-[#15181c] hover:text-white'
           }`}
         >
-          <span className="flex w-full items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-zinc-200">
-              {eventLabel(e)}
+          {active && <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-r bg-[#d7ff3a]" />}
+          {isDirect ? (
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#262b31] text-xs font-bold text-[#d5d9de]">
+              {monogram(label ?? '?')}
             </span>
-            {conflicted && (
-              <span className="text-xs" title="Un autre de tes événements a lieu en même temps">
-                ⚠️
-              </span>
-            )}
-            {countBadge(unread)}
+          ) : (
+            <span className={active ? 'text-[#d7ff3a]' : 'text-[#6f7782]'}>
+              <HashIcon />
+            </span>
+          )}
+          <span className={`flex-1 truncate ${unread > 0 || active ? 'font-semibold' : 'font-medium'}`}>{label}</span>
+          {c.type === 'ADMIN' && (
+            <span className="text-[#6f7782]" title="Accès restreint">
+              <LockIcon />
+            </span>
+          )}
+          {unread > 0 && <Badge count={unread} />}
+        </button>
+      </li>
+    );
+  };
+
+  const renderEvent = (e: Event, teamId: string, canManage: boolean) => {
+    const channelId = e.conversationId;
+    const active = channelId !== null && channelId === selectedId;
+    const unread = channelId ? unreadCounts[channelId] || 0 : 0;
+
+    return (
+      <li key={e.id} className="group/event relative px-3">
+        <button
+          type="button"
+          disabled={!channelId}
+          onClick={() => channelId && openConversation(channelId)}
+          className={`flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors ${
+            active
+              ? 'border-[#d7ff3a]/50 bg-[#1c2025]'
+              : channelId
+                ? 'border-[#23282e] bg-[#111418] hover:border-[#363d45] hover:bg-[#15181c]'
+                : 'cursor-default border-[#23282e] bg-[#111418] opacity-50'
+          }`}
+        >
+          <span
+            className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-md ${
+              active ? 'bg-[#d7ff3a] text-black' : 'bg-[#1c2025] text-white'
+            }`}
+          >
+            <span className="text-lg font-extrabold leading-5 tabular-nums">{dayOf(e.startsAt)}</span>
+            <span className="text-[11px] font-semibold uppercase leading-3">{monthOf(e.startsAt)}</span>
           </span>
-          <span className="text-xs text-zinc-500">
-            {formatEventDate(e.startsAt)}
-            {!channelId && ' · calendrier'}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15px] font-semibold text-white">{eventLabel(e)}</span>
+            <span className="mt-0.5 block truncate text-[13px] text-[#9aa1ab]">{formatEventDate(e.startsAt)}</span>
           </span>
+          {unread > 0 && <Badge count={unread} />}
         </button>
         {canManage && (
           <button
             type="button"
-            onClick={() => void deleteEvent(teamId, e)}
             title="Supprimer l'événement"
-            aria-label="Supprimer l'événement"
-            className="absolute right-1.5 bottom-1.5 hidden rounded px-1 text-xs text-zinc-500 group-hover/event:block hover:bg-red-500/15 hover:text-red-400"
+            onClick={() => void deleteEvent(teamId, e)}
+            className="absolute right-5 top-1/2 hidden -translate-y-1/2 rounded-md bg-[#111418] p-2 text-[#9aa1ab] hover:bg-red-500/15 hover:text-red-400 md:group-hover/event:flex"
           >
-            ✕
+            <TrashIcon />
           </button>
         )}
       </li>
     );
   };
 
-  const renderDirect = (c: Conversation) => {
-    const title = conversationTitle(c, meId);
-    const last = c.messages?.[0];
-    const active = c.id === selectedId;
-    const unread = unreadCounts[c.id] || 0;
-    return (
-      <li key={c.id}>
-        <button
-          type="button"
-          onClick={() => openConversation(c.id, null)}
-          className={`flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition ${
-            active ? 'bg-zinc-700/60 text-white' : 'text-zinc-300 hover:bg-zinc-800/80'
-          }`}
-        >
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-indigo-500 text-sm font-semibold text-white">
-            {title.charAt(0).toUpperCase()}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className={`block truncate text-sm ${unread > 0 ? 'font-bold text-white' : 'font-medium'}`}>
-              {title}
-            </span>
-            <span className={`block truncate text-xs ${unread > 0 ? 'text-zinc-300' : 'text-zinc-500'}`}>
-              {last ? last.content : 'Aucun message'}
-            </span>
-          </span>
-          {countBadge(unread)}
-        </button>
-      </li>
-    );
-  };
+  const canCreateEvent =
+    activeTeam &&
+    (activeTeam.myRole === 'CEO' || (activeTeam.myRole === 'COACH' && activeTeam.owner.plan === 'PREMIUM'));
 
-  const sectionTitle = 'px-2 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase';
+  const upcoming = (activeTeam?.events ?? []).filter((e) => !isArchived(e, now));
+  const nextEvent = [...upcoming].sort(
+    (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+  )[0];
 
-  const renderTeamPanel = (team: Team) => {
-    const isPremium = team.owner.plan === 'PREMIUM';
-    const canInvite = team.myRole === 'CEO' || (team.myRole === 'COACH' && isPremium);
+  const tabBase =
+    'relative flex h-16 shrink-0 items-center gap-2.5 px-4 text-sm font-semibold transition-colors';
 
-    // Mêmes règles que le serveur : le CEO, et les coachs en Premium.
-    // En Free, l'événement va dans le calendrier, sans salon dédié.
-    const canManageEvents = team.myRole === 'CEO' || (team.myRole === 'COACH' && isPremium);
+  const renderTabs = () => (
+    <>
+      <button
+        onClick={selectHome}
+        className={`${tabBase} ${!activeTeam ? 'text-white' : 'text-[#9aa1ab] hover:text-white'}`}
+      >
+        Messages
+        {unreadDirects + invitations.length > 0 && <Badge count={unreadDirects + invitations.length} />}
+        {!activeTeam && <span className="absolute inset-x-3 bottom-0 h-[3px] rounded-t bg-[#d7ff3a]" />}
+      </button>
 
-    // Archivé = plus de 7 jours après la date. Le salon reste accessible et on peut y écrire.
-    const allEvents = team.events ?? [];
-    const activeEvents = allEvents.filter((e) => !isArchived(e, now));
-    const archivedEvents = allEvents.filter((e) => isArchived(e, now)).reverse(); // plus récents d'abord
-    const archivesOpen = openArchives[team.id] ?? false;
+      <span className="mx-2 h-6 w-px shrink-0 bg-[#2a3037]" />
 
-    // Les salons d'events sont affichés dans « Événements », pas dans « Salons »
-    const fixedChannels = channelsOf(team.id).filter((c) => c.type !== 'EVENT');
-
-    return (
-      <>
-        <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-4 shadow-sm">
-          <div className="min-w-0">
-            <h2 className="truncate font-bold text-white">{team.name}</h2>
-            <p className="text-[11px] text-zinc-500">
-              {isPremium ? <span className="text-amber-400">★ Premium</span> : 'Free'} ·{' '}
-              {team.members.length}/{team.limits.maxSlots} membres
-            </p>
-          </div>
+      {teams.map((team) => {
+        const active = activeTeam?.id === team.id;
+        const unread = unreadOfTeam(team.id);
+        return (
           <button
-            type="button"
-            onClick={() => setSettingsTeamId(team.id)}
-            className="grid size-8 shrink-0 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
-            title="Paramètres de l'équipe"
-            aria-label="Paramètres de l'équipe"
+            key={team.id}
+            onClick={() => selectTeam(team)}
+            className={`${tabBase} ${active ? 'text-white' : 'text-[#9aa1ab] hover:text-white'}`}
           >
-            ⚙
-          </button>
-        </header>
-
-        <div className="flex-1 space-y-5 overflow-y-auto px-2 py-4">
-          {canInvite && (
-            <button
-              type="button"
-              onClick={() => setInviteTeamId(team.id)}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-500"
-            >
-              + Inviter des joueurs
-            </button>
-          )}
-
-          <section>
-            <h3 className={sectionTitle}>Salons</h3>
-            <ul className="space-y-0.5">{fixedChannels.map(renderChannel)}</ul>
-          </section>
-
-          <section className="border-t border-zinc-800/50 pt-3">
-            <div className="flex items-center justify-between px-2 pb-1">
-              <h3 className="text-xs font-semibold tracking-wider text-zinc-500 uppercase">
-                Événements
-              </h3>
-              {canManageEvents && (
-                <button
-                  type="button"
-                  onClick={() => setCreateEventTeamId(team.id)}
-                  title="Planifier un scrim ou un match"
-                  aria-label="Planifier un événement"
-                  className="rounded px-1 text-lg leading-none text-zinc-400 transition hover:bg-zinc-800 hover:text-white"
-                >
-                  +
-                </button>
-              )}
-            </div>
-
-            {activeEvents.length > 0 ? (
-              <ul className="space-y-0.5">
-                {activeEvents.map((e) => renderEvent(e, team.id, canManageEvents))}
-              </ul>
-            ) : (
-              <p className="px-2 py-1 text-xs text-zinc-600 italic">Aucun événement prévu.</p>
-            )}
-          </section>
-
-          {archivedEvents.length > 0 && (
-            <section>
-              <button
-                type="button"
-                onClick={() => setOpenArchives((prev) => ({ ...prev, [team.id]: !archivesOpen }))}
-                className="flex w-full items-center gap-1 px-2 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase hover:text-zinc-300"
-              >
-                <span className={`transition-transform ${archivesOpen ? 'rotate-90' : ''}`}>▸</span>
-                Archives ({archivedEvents.length})
-              </button>
-              {archivesOpen && (
-                <ul className="space-y-0.5 opacity-70">
-                  {archivedEvents.map((e) => renderEvent(e, team.id, canManageEvents))}
-                </ul>
-              )}
-            </section>
-          )}
-        </div>
-      </>
-    );
-  };
-
-  const renderHomePanel = () => {
-    const pill = (active: boolean) =>
-      `flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-[13px] font-medium transition ${
-        active ? 'bg-zinc-700/60 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
-      }`;
-    const titles = { dms: 'Messages privés', invitations: 'Invitations', events: 'Mes événements' };
-    return (
-      <>
-        <header className="flex h-14 shrink-0 items-center border-b border-zinc-800/80 px-4 shadow-sm">
-          <h2 className="font-bold text-white">{titles[homeTab]}</h2>
-        </header>
-        <div className="flex gap-1 p-2">
-          <button type="button" className={pill(homeTab === 'dms')} onClick={() => setHomeTab('dms')}>
-            Messages
-          </button>
-          <button
-            type="button"
-            className={pill(homeTab === 'invitations')}
-            onClick={() => setHomeTab('invitations')}
-          >
-            Invitations
-            {invitations.length > 0 && (
-              <span className="rounded-full bg-amber-500 px-1.5 text-[10px] leading-4 font-bold text-zinc-950">
-                {invitations.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            className={pill(homeTab === 'events')}
-            onClick={() => setHomeTab('events')}
-          >
-            Events
-            {conflictMap.size > 0 && (
-              <span title="Des événements se chevauchent" className="text-[11px]">
-                ⚠️
-              </span>
-            )}
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
-          {homeTab === 'invitations' ? (
-            <InvitationsList
-              invitations={invitations}
-              respondingId={respondingId}
-              error={invitationError}
-              onRespond={(inv, accept) => void respondToInvitation(inv, accept)}
-            />
-          ) : homeTab === 'events' ? (
-            <MyEventsList
-              events={myEvents}
-              canOpen={(conversationId) => conversations.some((c) => c.id === conversationId)}
-              onOpen={(conversationId) => openConversation(conversationId)}
-            />
-          ) : directs.length === 0 ? (
-            <p className="px-2 py-4 text-sm text-zinc-500">Aucun message privé pour l'instant.</p>
-          ) : (
-            <ul className="space-y-0.5">{directs.map(renderDirect)}</ul>
-          )}
-        </div>
-      </>
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 flex bg-zinc-950 text-zinc-100">
-      <ToastStack toasts={toasts} onOpen={handleToastOpen} onDismiss={dismissToast} />
-
-      <div className={`min-h-0 w-full shrink-0 md:flex md:w-auto ${selected ? 'hidden' : 'flex'}`}>
-        <nav className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-zinc-950 py-3">
-          <div className="group relative flex w-full justify-center">
-            {railPill(!activeTeam, unreadDirects > 0)}
-            <button
-              type="button"
-              onClick={selectHome}
-              title="Messages privés, invitations et événements"
-              className={`grid size-12 place-items-center text-xl transition-all duration-200 ${
-                !activeTeam
-                  ? 'rounded-2xl bg-indigo-500 text-white'
-                  : 'rounded-3xl bg-zinc-800 text-zinc-300 group-hover:rounded-2xl group-hover:bg-indigo-500 group-hover:text-white'
+            <span
+              className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-extrabold ${
+                active ? 'bg-[#d7ff3a] text-black' : 'bg-[#262b31] text-[#d5d9de]'
               }`}
             >
-              💬
-            </button>
-            {countBadge(unreadDirects + invitations.length, 'absolute -right-0 bottom-0 ring-4 ring-zinc-950')}
+              {monogram(team.name)}
+            </span>
+            <span className="whitespace-nowrap">{team.name}</span>
+            {unread > 0 && !active && <span className="h-2 w-2 rounded-full bg-[#d7ff3a]" />}
+            {active && <span className="absolute inset-x-3 bottom-0 h-[3px] rounded-t bg-[#d7ff3a]" />}
+          </button>
+        );
+      })}
+
+      <button
+        onClick={() => setIsCreateOpen(true)}
+        className="ml-3 flex h-9 shrink-0 items-center gap-2 self-center whitespace-nowrap rounded-lg border border-[#363d45] px-3.5 text-sm font-semibold text-[#d7ff3a] transition-colors hover:border-[#d7ff3a]/60 hover:bg-[#d7ff3a]/10"
+      >
+        <PlusIcon /> Nouvelle équipe
+      </button>
+    </>
+  );
+
+  return (
+    <div className="flex h-screen flex-col bg-[#0b0d0f] font-sans text-[15px] text-[#e9ebee] antialiased">
+      <ToastStack toasts={toasts} onOpen={handleToastOpen} onDismiss={dismissToast} />
+
+      {/* ============ BARRE DU HAUT ============ */}
+      <header className="z-10 shrink-0 border-b border-[#23282e] bg-[#0f1215]">
+        <div className="flex h-16 items-center justify-between pl-4 pr-3 md:pl-5">
+          <div className="flex min-w-0 items-center">
+            <div className="flex shrink-0 items-center gap-3 pr-4 md:pr-6">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#d7ff3a] text-black">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M9.2 1 3 9h4l-1 6 7-8.5H8.8z" />
+                </svg>
+              </span>
+              <span className="text-lg font-extrabold tracking-wide text-white">HUB</span>
+            </div>
+
+            <nav className={`hidden min-w-0 items-center overflow-x-auto md:flex ${NO_SCROLLBAR}`}>{renderTabs()}</nav>
           </div>
 
-          <div className="h-0.5 w-8 rounded-full bg-zinc-800" />
+          <div className="flex shrink-0 items-center">
+            <UserPanel onLogout={onLogout} onPlanChange={() => void refresh()} />
+          </div>
+        </div>
 
-          {teams.map((team) => {
-            const active = activeTeam?.id === team.id;
-            const unread = unreadOfTeam(team.id);
-            return (
-              <div key={team.id} className="group relative flex w-full justify-center">
-                {railPill(active, unread > 0)}
-                <button
-                  type="button"
-                  onClick={() => selectTeam(team)}
-                  title={team.name}
-                  className={`grid size-12 place-items-center bg-linear-to-br text-sm font-bold text-white shadow-md transition-all duration-200 ${teamColor(team.id)} ${
-                    active ? 'rounded-2xl' : 'rounded-3xl group-hover:rounded-2xl'
-                  }`}
-                >
-                  {initials(team.name)}
-                </button>
-                {team.owner.plan === 'PREMIUM' && (
-                  <span className="absolute top-0 right-2 text-[10px] text-amber-400 drop-shadow">★</span>
-                )}
-                {countBadge(unread, 'absolute -right-0 bottom-0 ring-4 ring-zinc-950')}
-              </div>
-            );
-          })}
+        {!selected && (
+          <nav className={`flex items-center overflow-x-auto border-t border-[#23282e] px-2 md:hidden ${NO_SCROLLBAR}`}>
+            {renderTabs()}
+          </nav>
+        )}
+      </header>
 
-          <button
-            type="button"
-            onClick={() => setIsCreateOpen(true)}
-            title="Créer une équipe"
-            className="grid size-12 place-items-center rounded-3xl bg-zinc-800 text-2xl text-emerald-400 transition-all duration-200 hover:rounded-2xl hover:bg-emerald-500 hover:text-white"
-          >
-            +
-          </button>
-        </nav>
-
-        <aside className="flex min-h-0 min-w-0 flex-1 flex-col bg-zinc-900 md:w-64 md:flex-none">
+      {/* ============ CORPS ============ */}
+      <div className="flex min-h-0 flex-1">
+        {/* ----- Panneau latéral ----- */}
+        <aside
+          className={`w-full shrink-0 flex-col border-r border-[#23282e] bg-[#0f1215] md:w-[340px] ${
+            selected ? 'hidden md:flex' : 'flex'
+          }`}
+        >
           {loading ? (
-            <p className="p-4 text-sm text-zinc-500">Chargement…</p>
-          ) : error ? (
-            <div className="m-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">
-              {error}{' '}
-              <button type="button" onClick={() => void load()} className="underline">
-                Réessayer
-              </button>
+            <div className="space-y-3 p-5">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-11 animate-pulse rounded-lg bg-[#171a1e]" />
+              ))}
+              <p className="pt-2 text-sm text-[#9aa1ab]">Chargement…</p>
             </div>
           ) : activeTeam ? (
-            renderTeamPanel(activeTeam)
-          ) : (
-            renderHomePanel()
-          )}
+            <div className="flex-1 overflow-y-auto pb-8">
+              <div className="flex items-center gap-3 px-5 pb-1 pt-5">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#d7ff3a] text-base font-extrabold text-black">
+                  {monogram(activeTeam.name)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-lg font-bold leading-6 text-white">{activeTeam.name}</h2>
+                  <div className="mt-0.5 flex items-center gap-2 text-[13px] text-[#9aa1ab]">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-xs font-bold ${
+                        activeTeam.owner.plan === 'PREMIUM'
+                          ? 'bg-[#d7ff3a]/15 text-[#d7ff3a]'
+                          : 'bg-[#262b31] text-[#c3c9d0]'
+                      }`}
+                    >
+                      {activeTeam.owner.plan === 'PREMIUM' ? 'PRO' : 'FREE'}
+                    </span>
+                    <span>{activeTeam.members.length} membres</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSettingsTeamId(activeTeam.id)}
+                  title="Paramètres de l'équipe"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-2xl leading-none text-[#9aa1ab] transition-colors hover:bg-[#1c2025] hover:text-white"
+                >
+                  ⚙
+                </button>
+              </div>
 
-          <UserPanel onLogout={onLogout} onPlanChange={() => void refresh()} />
+              <div className="px-5 pt-5">
+                {nextEvent ? (
+                  <button
+                    type="button"
+                    disabled={!nextEvent.conversationId}
+                    onClick={() => nextEvent.conversationId && openConversation(nextEvent.conversationId)}
+                    className="w-full rounded-xl border border-[#d7ff3a]/30 bg-gradient-to-br from-[#d7ff3a]/15 to-transparent p-4 text-left transition-colors hover:border-[#d7ff3a]/60 disabled:cursor-default"
+                  >
+                    <span className="text-xs font-semibold uppercase tracking-wider text-[#d7ff3a]">
+                      Prochain rendez-vous
+                    </span>
+                    <span className="mt-1.5 block truncate text-lg font-bold text-white">{eventLabel(nextEvent)}</span>
+                    <span className="mt-0.5 block text-sm text-[#c3c9d0]">{formatEventDate(nextEvent.startsAt)}</span>
+                  </button>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-[#2a3037] p-4 text-sm text-[#9aa1ab]">
+                    Aucun scrim ni événement prévu.
+                  </div>
+                )}
+              </div>
+
+              <section>
+                <SectionTitle>Salons</SectionTitle>
+                <ul className="space-y-0.5">
+                  {channelsOf(activeTeam.id)
+                    .filter((c) => c.type !== 'EVENT')
+                    .map(renderChannel)}
+                </ul>
+              </section>
+
+              <section>
+                <SectionTitle
+                  action={
+                    canCreateEvent ? (
+                      <button
+                        onClick={() => setCreateEventTeamId(activeTeam.id)}
+                        className="flex items-center gap-1.5 rounded-md border border-[#363d45] px-2.5 py-1.5 text-[13px] font-semibold text-[#d7ff3a] transition-colors hover:border-[#d7ff3a]/60 hover:bg-[#d7ff3a]/10"
+                      >
+                        <PlusIcon /> Nouveau
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  Agenda · Scrims &amp; events
+                </SectionTitle>
+                <ul className="space-y-2">{upcoming.map((e) => renderEvent(e, activeTeam.id, true))}</ul>
+              </section>
+            </div>
+          ) : (
+            <div className="flex flex-col h-full">
+              {/* Onglets d'accueil rétablis (Comms / Invites / Events) */}
+              <div className="flex gap-4 px-5 pt-5 pb-3 border-b border-[#23282e] shrink-0">
+                <button
+                  type="button"
+                  className={`text-xs font-semibold uppercase tracking-wider pb-1 border-b-2 transition-colors ${
+                    homeTab === 'dms' ? 'border-[#d7ff3a] text-white' : 'border-transparent text-[#9aa1ab] hover:text-white'
+                  }`}
+                  onClick={() => setHomeTab('dms')}
+                >
+                  Comms ({directs.length})
+                </button>
+                <button
+                  type="button"
+                  className={`text-xs font-semibold uppercase tracking-wider pb-1 border-b-2 transition-colors ${
+                    homeTab === 'invitations' ? 'border-[#d7ff3a] text-white' : 'border-transparent text-[#9aa1ab] hover:text-white'
+                  }`}
+                  onClick={() => setHomeTab('invitations')}
+                >
+                  Invites {invitations.length > 0 && `(${invitations.length})`}
+                </button>
+                <button
+                  type="button"
+                  className={`text-xs font-semibold uppercase tracking-wider pb-1 border-b-2 transition-colors ${
+                    homeTab === 'events' ? 'border-[#d7ff3a] text-white' : 'border-transparent text-[#9aa1ab] hover:text-white'
+                  }`}
+                  onClick={() => setHomeTab('events')}
+                >
+                  Events {conflictMap.size > 0 && '⚠️'}
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2">
+                {homeTab === 'invitations' ? (
+                  <InvitationsList
+                    invitations={invitations}
+                    respondingId={respondingId}
+                    error={invitationError}
+                    onRespond={(inv, accept) => void respondToInvitation(inv, accept)}
+                  />
+                ) : homeTab === 'events' ? (
+                  <MyEventsList
+                    events={myEvents}
+                    canOpen={(conversationId) => conversations.some((c) => c.id === conversationId)}
+                    onOpen={(conversationId) => openConversation(conversationId)}
+                  />
+                ) : directs.length === 0 ? (
+                  <p className="mx-5 my-4 text-xs font-mono text-[#9aa1ab] uppercase">Aucune conversation privée.</p>
+                ) : (
+                  <ul className="space-y-0.5">{directs.map((c) => renderChannel(c))}</ul>
+                )}
+              </div>
+            </div>
+          )}
         </aside>
+
+        {/* ----- Zone de discussion ----- */}
+        <main className={`min-w-0 flex-1 flex-col bg-[#0b0d0f] ${!selected ? 'hidden md:flex' : 'flex'}`}>
+          {selected ? (
+            <ConversationView
+              key={selected.id}
+              conversation={selected}
+              meId={meId}
+              teamName={selectedTeam?.name}
+              onOpenSettings={selectedTeam ? () => setSettingsTeamId(selectedTeam.id) : undefined}
+              onBack={() => setSelectedId(null)}
+              onMessageSent={handleNewMessage}
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl border border-[#23282e] bg-[#0f1215] text-[#d7ff3a]">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="8" />
+                  <circle cx="12" cy="12" r="2" />
+                  <path d="M12 1v5M12 18v5M1 12h5M18 12h5" />
+                </svg>
+              </span>
+              <p className="text-xl font-bold text-white">Aucune conversation ouverte</p>
+              <p className="mt-2 max-w-sm text-base text-[#9aa1ab]">
+                Choisis un salon ou un événement dans le panneau de gauche pour coordonner ton équipe.
+              </p>
+              {error && (
+                <p className="mt-5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-300">
+                  {error}
+                </p>
+              )}
+            </div>
+          )}
+        </main>
+
+        {/* ----- Panneau des membres ----- */}
+        {selected && selectedTeam && (
+          <MemberList
+            key={selectedTeam.id}
+            team={selectedTeam}
+            meId={meId}
+            onChanged={() => void refresh()}
+            onMessage={(userId) => void openDirect(userId)}
+          />
+        )}
       </div>
 
-      <main className={`min-h-0 min-w-0 flex-1 flex-col bg-zinc-950 ${selected ? 'flex' : 'hidden md:flex'}`}>
-        {selected ? (
-          <ConversationView
-            key={selected.id}
-            conversation={selected}
-            meId={meId}
-            teamName={selectedTeam?.name}
-            onOpenSettings={selectedTeam ? () => setSettingsTeamId(selectedTeam.id) : undefined}
-            onBack={() => setSelectedId(null)}
-            onMessageSent={handleNewMessage}
-          />
-        ) : (
-          <div className="grid flex-1 place-items-center p-6 text-center">
-            <div>
-              <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-zinc-900 text-3xl">
-                {activeTeam ? '#' : '💬'}
-              </div>
-              <p className="mt-4 font-semibold text-zinc-300">
-                {activeTeam ? `Bienvenue dans ${activeTeam.name}` : 'Tes messages privés'}
-              </p>
-              <p className="mt-1 text-sm text-zinc-500">
-                {activeTeam ? 'Choisis un salon pour commencer.' : 'Choisis une conversation.'}
-              </p>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {selected && selectedTeam && (
-        <MemberList
-          key={selectedTeam.id}
-          team={selectedTeam}
-          meId={meId}
-          onChanged={() => void refresh()}
-          onMessage={(userId) => void openDirect(userId)}
-        />
-      )}
-
-      {isCreateOpen && (
-        <CreateTeamModal
-          onClose={() => setIsCreateOpen(false)}
-          onCreated={(team) => void handleTeamCreated(team)}
-        />
-      )}
-
-      {/* Planifier un scrim ou un match */}
-      {createEventTeam && (
-        <CreateEventModal
-          teamId={createEventTeam.id}
-          isPremium={createEventTeam.owner.plan === 'PREMIUM'}
-          onClose={() => setCreateEventTeamId(null)}
-          onCreated={async () => {
-            setCreateEventTeamId(null);
-            await refresh(); // recharge les salons et les événements
-          }}
-        />
-      )}
-
-      {settingsTeam && (
-        <TeamSettingsModal
-          key={settingsTeam.id}
-          team={settingsTeam}
-          meId={meId}
-          onClose={() => setSettingsTeamId(null)}
-          onChanged={() => void refresh()}
-        />
-      )}
-
-      {inviteTeam && (
-        <AddMemberModal
-          teamId={inviteTeam.id}
-          memberIds={inviteTeam.members.map((m) => m.userId)}
-          onClose={() => setInviteTeamId(null)}
-        />
-      )}
+      {isCreateOpen && <CreateTeamModal onClose={() => setIsCreateOpen(false)} onCreated={handleTeamCreated} />}
+      {createEventTeam && <CreateEventModal teamId={createEventTeam.id} isPremium={createEventTeam.owner.plan === 'PREMIUM'} onClose={() => setCreateEventTeamId(null)} onCreated={refresh} />}
+      {settingsTeam && <TeamSettingsModal key={settingsTeam.id} team={settingsTeam} meId={meId} onClose={() => setSettingsTeamId(null)} onChanged={refresh} />}
+      {inviteTeam && <AddMemberModal teamId={inviteTeam.id} memberIds={inviteTeam.members.map(m => m.userId)} onClose={() => setInviteTeamId(null)} />}
     </div>
   );
 }
