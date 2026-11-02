@@ -4,13 +4,17 @@ import { clearToken, getToken, saveToken } from './api';
 import AuthPage from './AuthPage';
 import ChatPage from './ChatPage';
 import LandingPage from './LandingPage';
+import LegalPage from './LegalPage';
+import CookieBanner from './components/CookieBanner';
+import { useLegalPage } from './legal';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(getToken());
-  // 'landing' | 'auth'
   const [guestView, setGuestView] = useState<'landing' | 'auth'>('landing');
-  // 'login' | 'register'
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+
+  // Page légale demandée dans l'URL (#/mentions-legales, #/contact…), connecté ou non
+  const legalPage = useLegalPage();
 
   // Si le token expire, api.ts émet cet événement
   useEffect(() => {
@@ -38,14 +42,13 @@ export default function App() {
     setGuestView('auth');
   };
 
-  // Si l'utilisateur est connecté, il va directement au chat
-  if (token) {
-    return <ChatPage onLogout={handleLogout} />;
-  }
-
-  // Si non connecté : soit la landing, soit la page d'auth
-  if (guestView === 'auth') {
-    return (
+  let content;
+  if (legalPage) {
+    content = <LegalPage page={legalPage} />;
+  } else if (token) {
+    content = <ChatPage onLogout={handleLogout} />;
+  } else if (guestView === 'auth') {
+    content = (
       <div className="relative">
         <button
           type="button"
@@ -54,19 +57,19 @@ export default function App() {
         >
           ← Retour à l'accueil
         </button>
-        <AuthPage 
-          key={authMode} 
-          onLoggedIn={handleLoggedIn} 
-          initialMode={authMode} 
-        />
+        <AuthPage key={authMode} onLoggedIn={handleLoggedIn} initialMode={authMode} />
       </div>
+    );
+  } else {
+    content = (
+      <LandingPage onGetStarted={() => openAuth('register')} onLogin={() => openAuth('login')} />
     );
   }
 
   return (
-    <LandingPage
-      onGetStarted={() => openAuth('register')}
-      onLogin={() => openAuth('login')}
-    />
+    <>
+      {content}
+      <CookieBanner />
+    </>
   );
 }

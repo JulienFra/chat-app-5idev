@@ -109,6 +109,20 @@ export default function AuthPage({ onLoggedIn, initialMode = 'login' }: Props) {
             />
           </div>
 
+          {!isLogin && (
+            <p style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+              En créant un compte, tu acceptes les{' '}
+              <a href="#/conditions" style={{ textDecoration: 'underline' }}>
+                conditions d'utilisation
+              </a>{' '}
+              et la{' '}
+              <a href="#/confidentialite" style={{ textDecoration: 'underline' }}>
+                politique de confidentialité
+              </a>
+              .
+            </p>
+          )}
+
           <button type="submit" className="btn-primary" disabled={submitting}>
             {submitting ? 'Patiente…' : isLogin ? 'Se connecter' : "S'inscrire"}
           </button>
