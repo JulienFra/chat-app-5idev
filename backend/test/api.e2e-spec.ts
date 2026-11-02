@@ -4,6 +4,8 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Tests de bout en bout : on démarre la vraie application (mêmes réglages que main.ts)
 // et on l'appelle en HTTP comme le ferait le frontend, sur une vraie base PostgreSQL.
@@ -244,6 +246,84 @@ describe('API (e2e)', () => {
 
       // Un joueur ne lit pas #admin
       await http().get(`/api/conversations/${adminId}/messages`).set(auth(player)).expect(403);
+    });
+
+    // -------------------------------------------------------------------------
+    describe('Images', () => {
+      // Vraie signature PNG (8 premiers octets) suivie de données : suffit pour la détection
+      const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const fakePng = (size: number) => Buffer.concat([PNG_SIGNATURE, Buffer.alloc(size - PNG_SIGNATURE.length)]);
+
+      let imageUrl: string;
+      const savedFiles: string[] = [];
+
+      afterAll(() => {
+        // Supprime les images écrites sur le disque pendant les tests
+        for (const name of savedFiles) {
+          fs.rmSync(path.join(process.cwd(), 'uploads', name), { force: true });
+        }
+      });
+
+      it('accepte une image seule, sans texte, et lui donne une extension sûre', async () => {
+        const res = await http()
+          .post(`/api/conversations/${generalId}/messages`)
+          .set(auth(player))
+          .attach('image', fakePng(1024), { filename: 'capture.PNG', contentType: 'image/png' })
+          .expect(201);
+
+        imageUrl = res.body.imageUrl;
+        expect(res.body.content).toBe('');
+        expect(imageUrl).toMatch(/\/uploads\/[0-9a-f-]{36}\.png$/);
+        savedFiles.push(imageUrl.split('/').pop()!);
+      });
+
+      it('refuse un faux fichier image, même annoncé comme PNG (400)', async () => {
+        const res = await http()
+          .post(`/api/conversations/${generalId}/messages`)
+          .set(auth(player))
+          .attach('image', Buffer.from('<html><script>alert(1)</script></html>'), {
+            filename: 'piege.html',
+            contentType: 'image/png',
+          })
+          .expect(400);
+        expect(JSON.stringify(res.body.message)).toContain('Format invalide');
+      });
+
+      it('Free : refuse une image de plus de 2 Mo (400)', async () => {
+        const res = await http()
+          .post(`/api/conversations/${generalId}/messages`)
+          .set(auth(player)) // le joueur est en Free
+          .attach('image', fakePng(3 * 1024 * 1024), { filename: 'grosse.png', contentType: 'image/png' })
+          .expect(400);
+        expect(JSON.stringify(res.body.message)).toContain('2 Mo');
+      });
+
+      it('coupe la réception au-delà de 8 Mo, même en Premium (413)', async () => {
+        await http()
+          .post(`/api/conversations/${generalId}/messages`)
+          .set(auth(ceo)) // le CEO est Premium
+          .attach('image', fakePng(9 * 1024 * 1024), { filename: 'enorme.png', contentType: 'image/png' })
+          .expect(413);
+      });
+
+      it("sert l'image aux membres du salon, avec des en-têtes de sécurité", async () => {
+        const res = await http().get(imageUrl).set(auth(ceo)).expect(200);
+        expect(res.headers['content-type']).toContain('image/png');
+        expect(res.headers['x-content-type-options']).toBe('nosniff');
+        expect(res.headers['content-security-policy']).toBe("default-src 'none'");
+      });
+
+      it("refuse l'image sans token (401), à un intrus (403), et hors de son salon (404)", async () => {
+        await http().get(imageUrl).expect(401);
+        await http().get(imageUrl).set(auth(outsider)).expect(403);
+
+        // Même fichier demandé via #admin, où il n'a pas été envoyé
+        const filename = imageUrl.split('/').pop();
+        await http().get(`/api/conversations/${adminId}/messages/uploads/${filename}`).set(auth(ceo)).expect(404);
+
+        // Nom de fichier qui n'a pas le format attendu
+        await http().get(`/api/conversations/${generalId}/messages/uploads/piege.html`).set(auth(ceo)).expect(404);
+      });
     });
 
     // -------------------------------------------------------------------------
