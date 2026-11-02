@@ -394,7 +394,7 @@ chat-app-5idev/
 | Membre | Contributions principales |
 |---|---|
 | **Julien Francis** | Infrastructure (VPS, Nginx, PM2, Docker), CI/CD, temps réel (rooms Socket.io, live), non-lus côté serveur, toasts, pseudo unique et recherche, profil, invitations, refonte en équipes e-sport (rôles, salons, interface Discord), correctifs des événements et onglet « Mes events », tests unitaires et e2e, pages légales |
-| **Florentin Muraille** | Authentification JWT sécurisée, rôles & permissions, landing page & tarifs, temps réel (notifications, présence, indicateur de frappe), gestion des événements/scrims (salons dédiés et archivage), upload d'images sécurisé avec limites de taille (Free/Premium) et visionneuse Lightbox | Design final de l'appli
+| **Florentin Muraille** | Authentification JWT sécurisée, rôles & permissions, landing page & tarifs, temps réel (notifications, présence, indicateur de frappe), gestion des événements/scrims (salons dédiés et archivage), upload d'images sécurisé avec limites de taille (Free/Premium) et visionneuse Lightbox, Design final de l'appli | 
 
 ---
 
