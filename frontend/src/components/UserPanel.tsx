@@ -8,7 +8,7 @@ interface Props {
   onPlanChange?: () => void; // ex : recharger les équipes (limites, #admin)
 }
 
-// Barre « utilisateur » en bas de la colonne, comme sur Discord
+// Zone « utilisateur » intégrée à la barre du haut : sans fond ni bordure, elle se fond dans le header
 export default function UserPanel({ onLogout, onPlanChange }: Props) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -29,7 +29,7 @@ export default function UserPanel({ onLogout, onPlanChange }: Props) {
   }, []);
 
   if (!profile) {
-    return <div className="h-14 shrink-0 border-t border-zinc-800 bg-zinc-950/40" />;
+    return <div className="h-10 w-10 shrink-0" />;
   }
 
   const isPremium = profile.plan === 'PREMIUM';
@@ -41,28 +41,32 @@ export default function UserPanel({ onLogout, onPlanChange }: Props) {
   };
 
   const iconButton =
-    'grid size-8 shrink-0 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-800 hover:text-white';
+    'grid size-10 shrink-0 place-items-center rounded-lg text-xl leading-none text-[#9aa1ab] transition-colors hover:bg-[#1c2025] hover:text-white';
 
   return (
     <>
-      <div className="flex h-14 shrink-0 items-center gap-1 border-t border-zinc-800 bg-zinc-950/40 px-2">
+      <div className="flex shrink-0 items-center gap-1">
         {/* Avatar + pseudo : ouvre le profil */}
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 py-1 text-left transition hover:bg-zinc-800"
+          className="flex min-w-0 items-center gap-3 rounded-lg py-1.5 pl-1.5 pr-2 text-left transition-colors hover:bg-[#1c2025] sm:pr-3"
           title="Ouvrir mon profil"
         >
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-indigo-500 text-sm font-semibold text-white">
+          <span
+            className={`grid size-9 shrink-0 place-items-center rounded-full bg-[#262b31] text-sm font-bold text-white ${
+              isPremium ? 'ring-2 ring-[#d7ff3a]' : ''
+            }`}
+          >
             {profile.displayName.charAt(0).toUpperCase()}
           </span>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold text-white">
+          <span className="hidden min-w-0 sm:block">
+            <span className="block max-w-[140px] truncate text-[15px] font-semibold leading-5 text-white">
               {profile.displayName}
             </span>
             <span
-              className={`block text-[11px] font-medium ${
-                isPremium ? 'text-amber-400' : 'text-zinc-500'
+              className={`block text-xs font-semibold leading-4 ${
+                isPremium ? 'text-[#d7ff3a]' : 'text-[#9aa1ab]'
               }`}
             >
               {isPremium ? '★ Premium' : 'Free'}
@@ -102,35 +106,35 @@ export default function UserPanel({ onLogout, onPlanChange }: Props) {
       {/* Confirmation de déconnexion (au-dessus de la fenêtre Profil) */}
       {confirmLogout && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={() => setConfirmLogout(false)}
         >
           <div
             role="alertdialog"
             aria-labelledby="logout-title"
-            className="w-full max-w-xs rounded-xl border border-zinc-800 bg-zinc-900 p-6 text-center shadow-xl"
+            className="w-full max-w-sm rounded-2xl border border-[#2a3037] bg-[#0f1215] p-7 text-center shadow-2xl shadow-black/60"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mx-auto grid size-12 place-items-center rounded-full bg-red-500/15 text-xl text-red-400">
+            <div className="mx-auto grid size-14 place-items-center rounded-full bg-red-500/15 text-2xl text-red-400">
               ⏻
             </div>
-            <p id="logout-title" className="mt-3 text-lg font-semibold text-white">
+            <p id="logout-title" className="mt-4 text-xl font-bold text-white">
               Se déconnecter ?
             </p>
-            <p className="mt-1 text-sm text-zinc-400">Voulez-vous vraiment vous déconnecter ?</p>
-            <div className="mt-5 flex gap-2">
+            <p className="mt-2 text-[15px] text-[#9aa1ab]">Voulez-vous vraiment vous déconnecter ?</p>
+            <div className="mt-6 flex gap-3">
               <button
                 type="button"
                 autoFocus
                 onClick={() => setConfirmLogout(false)}
-                className="flex-1 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+                className="h-11 flex-1 rounded-lg border border-[#363d45] px-3 text-[15px] font-semibold text-[#d5d9de] transition-colors hover:border-[#4a525c] hover:bg-[#1c2025] hover:text-white"
               >
                 Annuler
               </button>
               <button
                 type="button"
                 onClick={onLogout}
-                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+                className="h-11 flex-1 rounded-lg bg-red-600 px-3 text-[15px] font-bold text-white transition-colors hover:bg-red-500"
               >
                 Se déconnecter
               </button>

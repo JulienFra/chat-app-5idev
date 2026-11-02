@@ -13,9 +13,9 @@ interface Props {
 const ROLE_LABEL: Record<TeamRole, string> = { CEO: 'CEO', COACH: 'Coach', PLAYER: 'Joueur' };
 const GROUP_LABEL: Record<TeamRole, string> = { CEO: 'CEO', COACH: 'Coachs', PLAYER: 'Joueurs' };
 const ROLE_STYLE: Record<TeamRole, string> = {
-  CEO: 'bg-amber-500/15 text-amber-300',
+  CEO: 'bg-[#d7ff3a]/15 text-[#d7ff3a]',
   COACH: 'bg-sky-500/15 text-sky-300',
-  PLAYER: 'bg-zinc-700/60 text-zinc-400',
+  PLAYER: 'bg-[#262b31] text-[#c3c9d0]',
 };
 
 export default function MemberList({ team, meId, onChanged, onMessage }: Props) {
@@ -103,46 +103,50 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
     const actions = canChangeRole(m) || canKick(m) || !isMe;
 
     return (
-      <li key={m.userId}>
+      <li key={m.userId} className="px-3">
         <button
           type="button"
           onClick={() => {
             setOpenId(open ? null : m.userId);
             setError(null);
           }}
-          className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition ${
-            open ? 'bg-zinc-700/60' : 'hover:bg-zinc-800/80'
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+            open ? 'bg-[#1c2025]' : 'hover:bg-[#15181c]'
           }`}
         >
-          <div className="relative">
-            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-zinc-700 text-xs font-semibold text-white">
+          <div className="relative shrink-0">
+            <span className="grid size-9 place-items-center rounded-full bg-[#262b31] text-sm font-bold text-[#e9ebee]">
               {m.user.displayName.charAt(0).toUpperCase()}
             </span>
             <span
-              className={`absolute bottom-0 right-0 size-2.5 rounded-full border-[1.5px] border-zinc-900 ${
-                isOnline ? 'bg-green-500' : 'bg-zinc-500'
+              className={`absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-[#0f1215] ${
+                isOnline ? 'bg-[#d7ff3a]' : 'bg-[#4a525c]'
               }`}
               title={isOnline ? 'En ligne' : 'Hors ligne'}
             />
           </div>
 
-          <span className={`min-w-0 flex-1 truncate text-sm transition-colors ${isOnline ? 'text-zinc-200' : 'text-zinc-400'}`}>
+          <span
+            className={`min-w-0 flex-1 truncate text-[15px] font-medium transition-colors ${
+              isOnline ? 'text-white' : 'text-[#9aa1ab]'
+            }`}
+          >
             {m.user.displayName}
-            {isMe && <span className="text-zinc-600"> (toi)</span>}
+            {isMe && <span className="font-normal text-[#6f7782]"> (toi)</span>}
           </span>
           {!isPremium && m.role === 'CEO' && (
-            <span className="text-xs" title="Créateur de l'équipe">
+            <span className="text-base" title="Créateur de l'équipe">
               👑
             </span>
           )}
         </button>
 
         {open && (
-          <div className="mx-1 mt-1 mb-2 space-y-2 rounded-lg border border-zinc-700/60 bg-zinc-950/60 p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-white">{m.user.displayName}</span>
+          <div className="mb-2 mt-1 space-y-3 rounded-xl border border-[#2a3037] bg-[#0b0d0f] p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[15px] font-bold text-white">{m.user.displayName}</span>
               {isPremium && (
-                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${ROLE_STYLE[m.role]}`}>
+                <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-bold ${ROLE_STYLE[m.role]}`}>
                   {ROLE_LABEL[m.role]}
                 </span>
               )}
@@ -150,20 +154,18 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
 
             {canChangeRole(m) && (
               <div>
-                <p className="mb-1 text-[11px] font-semibold tracking-wider text-zinc-500 uppercase">
-                  Rôle
-                </p>
-                <div className="flex gap-1">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-[#9aa1ab]">Rôle</p>
+                <div className="flex gap-2">
                   {(['COACH', 'PLAYER'] as const).map((role) => (
                     <button
                       key={role}
                       type="button"
                       disabled={busy}
                       onClick={() => changeRole(m, role)}
-                      className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition disabled:opacity-50 ${
+                      className={`flex-1 rounded-lg px-2 py-2 text-sm font-semibold transition-colors disabled:opacity-50 ${
                         m.role === role
-                          ? 'bg-violet-600 text-white'
-                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                          ? 'bg-[#d7ff3a] text-black'
+                          : 'border border-[#363d45] text-[#d5d9de] hover:border-[#4a525c] hover:bg-[#1c2025] hover:text-white'
                       }`}
                     >
                       {ROLE_LABEL[role]}
@@ -177,7 +179,7 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
               <button
                 type="button"
                 onClick={() => onMessage(m.userId)}
-                className="w-full rounded-md bg-zinc-800 px-2 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700"
+                className="w-full rounded-lg border border-[#363d45] px-3 py-2 text-sm font-semibold text-[#d5d9de] transition-colors hover:border-[#4a525c] hover:bg-[#1c2025] hover:text-white"
               >
                 💬 Message privé
               </button>
@@ -188,14 +190,14 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
                 type="button"
                 disabled={busy}
                 onClick={() => kick(m)}
-                className="w-full rounded-md bg-red-500/10 px-2 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                className="w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-300 transition-colors hover:bg-red-500/20 disabled:opacity-50"
               >
                 Exclure de l'équipe
               </button>
             )}
 
-            {!actions && <p className="text-xs text-zinc-500">Aucune action disponible.</p>}
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {!actions && <p className="text-sm text-[#9aa1ab]">Aucune action disponible.</p>}
+            {error && <p className="text-sm text-red-300">{error}</p>}
           </div>
         )}
       </li>
@@ -203,23 +205,26 @@ export default function MemberList({ team, meId, onChanged, onMessage }: Props) 
   };
 
   return (
-    <aside className="hidden w-60 shrink-0 flex-col border-l border-zinc-800/80 bg-zinc-900 lg:flex">
-      <header className="flex h-14 shrink-0 items-center border-b border-zinc-800/80 px-4 shadow-sm">
-        <h2 className="text-sm font-bold text-white">
-          Membres <span className="font-normal text-zinc-500">— {team.members.length}</span>
-        </h2>
+    <aside className="hidden w-[300px] shrink-0 flex-col border-l border-[#23282e] bg-[#0f1215] lg:flex">
+      <header className="flex h-16 shrink-0 items-center justify-between border-b border-[#23282e] px-5">
+        <h2 className="text-lg font-bold text-white">Membres</h2>
+        <span className="rounded-full bg-[#1c2025] px-2.5 py-1 text-sm font-semibold tabular-nums text-[#d5d9de]">
+          {team.members.length}
+        </span>
       </header>
-      <div className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
+      <div className="flex-1 overflow-y-auto pb-6">
         {groups.map((role) => {
           const members = role ? team.members.filter((m) => m.role === role) : team.members;
           if (members.length === 0) return null;
           return (
             <section key={role ?? 'all'}>
               {role && (
-                <h3 className="px-2 pb-1 text-xs font-semibold tracking-wider text-zinc-500 uppercase">
-                  {GROUP_LABEL[role]} — {members.length}
+                <h3 className="flex items-center justify-between px-5 pb-2 pt-6 text-xs font-semibold uppercase tracking-wider text-[#9aa1ab]">
+                  <span>{GROUP_LABEL[role]}</span>
+                  <span className="tabular-nums">{members.length}</span>
                 </h3>
               )}
+              {!role && <div className="pt-3" />}
               <ul className="space-y-0.5">{members.map(renderMember)}</ul>
             </section>
           );

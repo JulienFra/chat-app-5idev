@@ -55,7 +55,7 @@ function AuthImage({
   }, [url]);
 
   if (!src) {
-    return <div className={`animate-pulse bg-zinc-800/50 ${className}`} style={{ minHeight: '150px' }} />;
+    return <div className={`animate-pulse bg-[#262b31] ${className}`} style={{ minHeight: '150px' }} />;
   }
   
   return (
@@ -262,29 +262,30 @@ export default function ConversationView({
 
   return (
     <>
-      <header className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-3">
+      {/* ============ EN-TÊTE DU SALON ============ */}
+      <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-[#23282e] bg-[#0f1215] px-4 md:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="text-xl text-zinc-400 hover:text-white md:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-2xl leading-none text-[#9aa1ab] transition-colors hover:bg-[#1c2025] hover:text-white md:hidden"
           >
             ←
           </button>
           <div className="min-w-0">
-            <h2 className="truncate font-semibold">{conversationTitle(conversation, meId)}</h2>
+            <h2 className="truncate text-lg font-bold leading-6 text-white">{conversationTitle(conversation, meId)}</h2>
             {teamName && (
-              <p className="truncate text-xs text-zinc-500">
+              <p className="truncate text-[13px] text-[#9aa1ab]">
                 {teamName} · {memberships.length} membre{memberships.length > 1 ? 's' : ''}
               </p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={toggleMute}
-            className="shrink-0 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="rounded-lg border border-[#363d45] px-3.5 py-2 text-sm font-semibold text-[#d5d9de] transition-colors hover:border-[#4a525c] hover:bg-[#1c2025] hover:text-white"
           >
             {isMuted ? '🔕 Muet' : '🔔 Son'}
           </button>
@@ -292,7 +293,7 @@ export default function ConversationView({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="shrink-0 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 transition-colors"
+              className="rounded-lg border border-[#363d45] px-3.5 py-2 text-sm font-semibold text-[#d5d9de] transition-colors hover:border-[#4a525c] hover:bg-[#1c2025] hover:text-white"
             >
               ⚙ Équipe
             </button>
@@ -300,15 +301,19 @@ export default function ConversationView({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 relative flex flex-col">
-        {loading && <p className="text-center text-sm text-zinc-500">Chargement…</p>}
+      {/* ============ MESSAGES ============ */}
+      <div className="relative flex flex-1 flex-col overflow-y-auto bg-[#0b0d0f] px-4 py-5 md:px-6">
+        {loading && <p className="text-center text-sm text-[#9aa1ab]">Chargement…</p>}
         {error && (
-          <p className="mx-auto max-w-md rounded-lg bg-red-500/10 p-3 text-center text-sm text-red-400">
+          <p className="mx-auto max-w-md rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-center text-sm text-red-300">
             {error}
           </p>
         )}
         {!loading && !error && messages.length === 0 && (
-          <p className="text-center text-sm text-zinc-500">Aucun message. Lance la discussion !</p>
+          <div className="m-auto text-center">
+            <p className="text-lg font-bold text-white">Aucun message</p>
+            <p className="mt-1 text-[15px] text-[#9aa1ab]">Lance la discussion !</p>
+          </div>
         )}
 
         {messages.map((m, i) => {
@@ -320,18 +325,18 @@ export default function ConversationView({
             <div
               key={m.id}
               className={`flex ${mine ? 'justify-end' : 'justify-start'} ${
-                sameAuthorAsPrevious ? 'mt-1' : 'mt-3'
+                sameAuthorAsPrevious ? 'mt-1' : 'mt-4'
               }`}
             >
               <div
-                className={`max-w-[75%] rounded-2xl px-3 py-2 ${
+                className={`max-w-[85%] rounded-xl px-4 py-2.5 md:max-w-[65%] ${
                   mine
-                    ? 'rounded-br-md bg-indigo-600 text-white'
-                    : 'rounded-bl-md bg-zinc-800 text-zinc-100'
+                    ? 'rounded-br-sm bg-[#d7ff3a] text-black'
+                    : 'rounded-bl-sm border border-[#23282e] bg-[#1c2025] text-[#e9ebee]'
                 }`}
               >
                 {showAuthor && (
-                  <p className="mb-0.5 text-xs font-semibold text-violet-300">
+                  <p className="mb-1 text-[13px] font-bold text-[#d7ff3a]">
                     {m.author?.displayName ?? 'Inconnu'}
                   </p>
                 )}
@@ -340,16 +345,16 @@ export default function ConversationView({
                   <AuthImage 
                     url={m.imageUrl} 
                     alt="Pièce jointe" 
-                    className="mt-1 mb-2 max-h-64 rounded-xl object-contain bg-black/20"
+                    className="mb-2 mt-1 max-h-64 rounded-lg bg-black/20 object-contain"
                     onClick={(src) => setExpandedImage(src)}
                   />
                 )}
                 
-                {m.content && <p className="break-words whitespace-pre-wrap">{m.content}</p>}
+                {m.content && <p className="whitespace-pre-wrap break-words text-[15px] leading-6">{m.content}</p>}
                 
                 <p
-                  className={`mt-1 text-right text-[11px] ${
-                    mine ? 'text-indigo-200' : 'text-zinc-500'
+                  className={`mt-1 text-right text-xs tabular-nums ${
+                    mine ? 'text-black/60' : 'text-[#9aa1ab]'
                   }`}
                 >
                   {formatTime(m.createdAt)}
@@ -361,35 +366,37 @@ export default function ConversationView({
         <div ref={bottomRef} />
       </div>
 
-      <div className="px-4 pb-1 pt-1 bg-zinc-900 min-h-[24px]">
+      {/* ============ INDICATEUR DE FRAPPE ============ */}
+      <div className="min-h-[28px] bg-[#0b0d0f] px-4 pb-1 md:px-6">
         {typingText ? (
-          <span className="text-xs italic text-violet-400 animate-pulse transition-opacity">
+          <span className="animate-pulse text-[13px] font-medium text-[#d7ff3a] transition-opacity">
             {typingText}
           </span>
         ) : null}
       </div>
 
-      <form onSubmit={handleSend} className="border-t border-zinc-800 bg-zinc-900 px-4 py-3 relative">
+      {/* ============ ZONE DE SAISIE ============ */}
+      <form onSubmit={handleSend} className="relative shrink-0 border-t border-[#23282e] bg-[#0f1215] px-4 py-4 md:px-6">
         {selectedFile && (
-          <div className="absolute bottom-[100%] mb-2 left-4 rounded-lg bg-zinc-800 p-2 shadow-lg border border-zinc-700 flex items-center gap-3">
-            <div className="text-xs text-zinc-300 truncate max-w-[150px]">{selectedFile.name}</div>
+          <div className="absolute bottom-[100%] left-4 mb-2 flex items-center gap-3 rounded-lg border border-[#363d45] bg-[#1c2025] px-3 py-2 shadow-lg md:left-6">
+            <div className="max-w-[200px] truncate text-sm text-[#d5d9de]">{selectedFile.name}</div>
             <button 
               type="button" 
               onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-              className="text-red-400 hover:text-red-300 text-sm font-bold"
+              className="text-base font-bold text-red-400 hover:text-red-300"
             >
               ✕
             </button>
           </div>
         )}
 
-        {sendError && <p className="mb-2 text-sm text-red-400">{sendError}</p>}
+        {sendError && <p className="mb-2 text-sm text-red-300">{sendError}</p>}
         
-        <div className="flex gap-2 items-center">
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="grid size-10 shrink-0 place-items-center rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+            className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#363d45] text-lg text-[#d5d9de] transition-colors hover:border-[#4a525c] hover:bg-[#1c2025] hover:text-white"
             title="Joindre une image"
           >
             📎
@@ -410,12 +417,12 @@ export default function ConversationView({
             onChange={handleTyping}
             maxLength={4000}
             placeholder={`Écris dans ${conversationTitle(conversation, meId)}…`}
-            className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none transition-colors"
+            className="h-11 min-w-0 flex-1 rounded-lg border border-[#2a3037] bg-[#0b0d0f] px-4 text-[15px] text-[#e9ebee] placeholder:text-[#6f7782] transition-colors focus:border-[#d7ff3a] focus:outline-none"
           />
           <button
             type="submit"
             disabled={sending || (!draft.trim() && !selectedFile)}
-            className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+            className="h-11 shrink-0 rounded-lg bg-[#d7ff3a] px-5 text-[15px] font-bold text-black transition-colors hover:bg-[#e4ff72] disabled:cursor-not-allowed disabled:opacity-40"
           >
             Envoyer
           </button>
@@ -435,7 +442,7 @@ export default function ConversationView({
           />
           <button 
             type="button"
-            className="absolute top-4 right-4 md:top-8 md:right-8 text-white/50 hover:text-white text-4xl"
+            className="absolute right-4 top-4 text-4xl text-white/60 hover:text-white md:right-8 md:top-8"
             onClick={() => setExpandedImage(null)}
           >
             &times;
