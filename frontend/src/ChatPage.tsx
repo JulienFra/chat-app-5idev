@@ -118,7 +118,6 @@ export default function ChatPage({ onLogout }: Props) {
 
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [homeTab, setHomeTab] = useState<'dms' | 'invitations' | 'events'>('dms');
-  const [openArchives, setOpenArchives] = useState<Record<string, boolean>>({});
 
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [respondingId, setRespondingId] = useState<string | null>(null);
